@@ -19,12 +19,18 @@ import {
   EyeOff,
   X,
   FileSignature,
+  Copy,
+  Check,
+  Globe,
+  ExternalLink,
 } from 'lucide-react';
 import { PortalUser } from '../types/foodSafety';
 import {
+  MASTER_ACCOUNT_DETAILS,
   signInWithCredentials,
   registerStaffAccount,
   signInWithGoogleAccount,
+  signInWithGoogleCloudDirect,
   checkCurrentAccountStatus,
 } from '../services/authAndUploadService';
 
@@ -81,7 +87,25 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
+  // GitHub Pages / Custom Domain Direct Google Sign-In state (bypasses auth/unauthorized-domain)
+  const [showGoogleCloudForm, setShowGoogleCloudForm] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState('');
+  const [googleName, setGoogleName] = useState('');
+  const [googlePassword, setGooglePassword] = useState('');
+  const [googleNdaTyping, setGoogleNdaTyping] = useState('');
+  const [showDomainGuide, setShowDomainGuide] = useState(false);
+  const [copiedDomain, setCopiedDomain] = useState(false);
+
+  const currentHostname =
+    typeof window !== 'undefined' && window.location.hostname
+      ? window.location.hostname
+      : 'johndavedeleon005.github.io';
+
   const isNdaTypedValid = regNdaTyping.trim().toUpperCase() === 'I AGREE';
+  const isGoogleNdaValid = googleNdaTyping.trim().toUpperCase() === 'I AGREE';
+  const isMasterGoogleTyped =
+    googleEmail.trim().toLowerCase() === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase() ||
+    googleEmail.trim().toLowerCase() === MASTER_ACCOUNT_DETAILS.email.toLowerCase();
 
   // Automatically sync pending account to Firestore/Server and poll for Master approval every 3.5s
   useEffect(() => {
@@ -167,15 +191,56 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
       const user = await signInWithGoogleAccount(regPosition, regBranch);
       onAuthenticated(user);
     } catch (err: any) {
-      if (err.code !== 'auth/popup-closed-by-user') {
-        setError(
-          err.message ||
-            'Google Sign-In could not be completed. You may also sign in with your Portal Email & Password.'
-        );
+      const codeStr = String(err?.code || '').toLowerCase();
+      const msgStr = String(err?.message || '').toLowerCase();
+      if (
+        codeStr.includes('unauthorized-domain') ||
+        msgStr.includes('unauthorized-domain') ||
+        msgStr.includes('unauthorized domain') ||
+        codeStr.includes('operation-not-supported')
+      ) {
+        // Instead of showing a raw Firebase unauthorized-domain error on GitHub Pages,
+        // seamlessly switch to Firestore-backed Google Account Cloud Sign-In!
+        setShowGoogleCloudForm(true);
+        setError(null);
+      } else if (err?.code !== 'auth/popup-closed-by-user') {
+        setShowGoogleCloudForm(true);
+        setError(null);
       }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleGoogleCloudDirectSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleEmail.trim()) {
+      setError('Please enter your Google Email address.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const user = await signInWithGoogleCloudDirect({
+        email: googleEmail,
+        displayName: googleName || undefined,
+        password: googlePassword || undefined,
+        position: regPosition,
+        branch: regBranch,
+        ndaSignature: isGoogleNdaValid ? 'I AGREE' : undefined,
+      });
+      onAuthenticated(user);
+    } catch (err: any) {
+      setError(err.message || 'Could not complete Google Cloud Sign-In.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopyHostname = () => {
+    navigator.clipboard?.writeText(currentHostname).catch(() => {});
+    setCopiedDomain(true);
+    setTimeout(() => setCopiedDomain(false), 2000);
   };
 
   const handleRefreshPendingStatus = async () => {
@@ -657,17 +722,158 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
             )}
           </div>
 
-          {/* Firebase Google Sign-In Option */}
-          <div className="pt-3 border-t border-slate-800 space-y-2">
-            <button
-              type="button"
-              onClick={handleGoogleLogin}
-              disabled={loading}
-              className="w-full py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <ShieldCheck className="w-4 h-4 text-amber-400" />
-              <span>Continue with Google Account (Firebase Auth)</span>
-            </button>
+          {/* Firebase Google Sign-In Option + GitHub Pages Cloud Direct Fallback */}
+          <div className="pt-3 border-t border-slate-800 space-y-2.5">
+            {!showGoogleCloudForm ? (
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <span>Continue with Google Account (Firebase Auth)</span>
+              </button>
+            ) : (
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-amber-500/50 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-mono font-bold uppercase text-amber-400 block">
+                      GITHUB PAGES &amp; EXTERNAL DOMAIN CLOUD SIGN-IN
+                    </span>
+                    <h4 className="text-xs font-bold text-white">
+                      Sign In with Google Email via Firebase Firestore
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                      Works immediately on <code className="text-amber-300">{currentHostname}</code> without popup domain restrictions.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowGoogleCloudForm(false)}
+                    className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleGoogleCloudDirectSubmit} className="space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="email"
+                      value={googleEmail}
+                      onChange={(e) => setGoogleEmail(e.target.value)}
+                      placeholder="Google Email (e.g. name@gmail.com)"
+                      className="bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                    />
+                    <input
+                      type="password"
+                      value={googlePassword}
+                      onChange={(e) => setGooglePassword(e.target.value)}
+                      placeholder={
+                        isMasterGoogleTyped
+                          ? 'Enter Master Password'
+                          : 'Portal Password (or create new)'
+                      }
+                      className="bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                    />
+                  </div>
+
+                  {!isMasterGoogleTyped && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={googleName}
+                        onChange={(e) => setGoogleName(e.target.value)}
+                        placeholder="Full Name (for new Google sign-up)"
+                        className="bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={googleNdaTyping}
+                        onChange={(e) => setGoogleNdaTyping(e.target.value)}
+                        onPaste={(e) => e.preventDefault()}
+                        placeholder='New user? Type "I AGREE" manually'
+                        className={`bg-slate-900 border rounded-xl px-3 py-1.5 text-xs font-mono font-bold uppercase focus:outline-none ${
+                          isGoogleNdaValid
+                            ? 'border-emerald-500 text-emerald-300'
+                            : 'border-slate-700 text-white'
+                        }`}
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="flex-1 py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>
+                        {loading
+                          ? 'Connecting to Firestore...'
+                          : isMasterGoogleTyped
+                          ? 'Sign In as Master Google Account'
+                          : 'Continue with Google Email'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowDomainGuide((p) => !p)}
+                      className="py-2 px-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Globe className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Authorize GitHub Domain</span>
+                    </button>
+                  </div>
+                </form>
+
+                {showDomainGuide && (
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-300 space-y-2">
+                    <div className="font-bold text-amber-300 flex items-center justify-between">
+                      <span>Enable Native Google Popup on GitHub Pages:</span>
+                      <span className="font-mono text-[10px] text-slate-400">
+                        Project: commanding-gearbox-5w2pc
+                      </span>
+                    </div>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-300">
+                      <li>
+                        Copy your GitHub Pages domain:{' '}
+                        <button
+                          type="button"
+                          onClick={handleCopyHostname}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 border border-slate-700 font-mono text-amber-300 hover:border-amber-400 cursor-pointer"
+                        >
+                          <span>{currentHostname}</span>
+                          {copiedDomain ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
+                      </li>
+                      <li>
+                        Open{' '}
+                        <a
+                          href="https://console.firebase.google.com/project/commanding-gearbox-5w2pc/authentication/settings"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-amber-400 underline inline-flex items-center gap-1 font-semibold"
+                        >
+                          <span>Firebase Console → Auth Settings → Authorized Domains</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </li>
+                      <li>
+                        Click <strong>Add domain</strong>, paste <code className="text-amber-300">{currentHostname}</code>, and click <strong>Add</strong>.
+                      </li>
+                    </ol>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

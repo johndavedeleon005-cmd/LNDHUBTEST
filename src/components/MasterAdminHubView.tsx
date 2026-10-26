@@ -1185,6 +1185,51 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
               </button>
             </div>
           </div>
+
+          {/* GitHub Pages & Firebase Authorized Domains Setup Card */}
+          <div className="p-4 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-2.5 text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <span>GitHub Pages &amp; Firebase Authorized Domains Setup</span>
+              </div>
+              <span className="font-mono text-[10px] text-slate-400">
+                Firebase Project ID: commanding-gearbox-5w2pc
+              </span>
+            </div>
+            <p className="text-slate-300 leading-relaxed">
+              Portal Email/Password Sign-In, Staff Account Creation (&quot;I AGREE&quot;), and Google Email Cloud Sign-In work automatically on GitHub Pages via Firestore without domain popup restrictions. To also enable the 1-click Google OAuth Popup on GitHub Pages (<code className="text-amber-300">johndavedeleon005.github.io</code>), add your GitHub Pages domain to Firebase Authorized Domains:
+            </p>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() =>
+                  handleCopy(
+                    typeof window !== 'undefined' && window.location.hostname.includes('github.io')
+                      ? window.location.hostname
+                      : 'johndavedeleon005.github.io',
+                    'gh-domain'
+                  )
+                }
+                className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-300 font-mono font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                {copiedKey === 'gh-domain' ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+                <span>Copy Domain: johndavedeleon005.github.io</span>
+              </button>
+              <a
+                href="https://console.firebase.google.com/project/commanding-gearbox-5w2pc/authentication/settings"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs inline-flex items-center gap-1.5"
+              >
+                <span>Open Firebase Auth Authorized Domains</span>
+              </a>
+            </div>
+          </div>
         </div>
       )}
     </div>

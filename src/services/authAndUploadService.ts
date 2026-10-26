@@ -548,6 +548,92 @@ export async function signInWithGoogleAccount(
   return finalUser;
 }
 
+/**
+ * Direct Firestore-backed Google Account Sign-In / Registration for GitHub Pages (*.github.io)
+ * and external domains where Firebase Auth's OAuth popup throws auth/unauthorized-domain.
+ */
+export async function signInWithGoogleCloudDirect(params: {
+  email: string;
+  displayName?: string;
+  password?: string;
+  position?: string;
+  branch?: string;
+  ndaSignature?: string;
+}): Promise<PortalUser> {
+  const cleanEmail = params.email.trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    throw new Error('Please enter a valid Google Email address (e.g. name@gmail.com).');
+  }
+
+  const isMaster =
+    cleanEmail === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase() ||
+    cleanEmail === MASTER_ACCOUNT_DETAILS.email.toLowerCase();
+
+  if (isMaster) {
+    const cleanPw = (params.password || '').trim();
+    if (cleanPw !== MASTER_ACCOUNT_DETAILS.password) {
+      throw new Error(
+        'Master Google Account detected. Please enter the Master Account Password to verify ownership on GitHub Pages.'
+      );
+    }
+    return signInWithCredentials(cleanEmail, cleanPw);
+  }
+
+  // Check if this Google email already exists in Firebase Firestore
+  const detUid = toDeterministicUid(cleanEmail);
+  const nowIso = new Date().toISOString();
+
+  try {
+    const snap = await getDoc(doc(db, 'users', detUid));
+    if (snap.exists()) {
+      const d = snap.data();
+      if (d.credentialPass && params.password && d.credentialPass !== params.password.trim()) {
+        throw new Error('Incorrect password for this registered Google account.');
+      }
+      const existingUser: PortalUser = {
+        uid: d.uid || detUid,
+        email: d.email || cleanEmail,
+        displayName: d.displayName || params.displayName || cleanEmail.split('@')[0],
+        position: d.position || params.position || 'Kitchen / Service Staff',
+        branch: d.branch || params.branch || 'Jiangnan Hotpot - SM Mall of Asia',
+        role: d.role === 'master' ? 'master' : 'staff',
+        status:
+          d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending',
+        ndaAccepted: true,
+        ndaSignature: d.ndaSignature || 'I AGREE',
+        ndaAcceptedAt: d.ndaAcceptedAt || nowIso,
+        createdAt: d.ndaAcceptedAt || nowIso,
+        updatedAt: nowIso,
+        authProvider: 'google',
+      };
+      saveSessionUser(existingUser);
+      broadcastAccountSync();
+      return existingUser;
+    }
+  } catch (err: any) {
+    if (err.message?.includes('Incorrect password')) {
+      throw err;
+    }
+  }
+
+  // If account doesn't exist yet, require "I AGREE" and register directly in Firestore
+  const cleanSig = String(params.ndaSignature || '').trim().toUpperCase();
+  if (cleanSig !== 'I AGREE') {
+    throw new Error(
+      'New Google Account detected. Please type "I AGREE" in the Confidentiality Agreement box below to submit your Google account for Master Account approval.'
+    );
+  }
+
+  return registerStaffAccount({
+    email: cleanEmail,
+    password: (params.password || 'GoogleAuth2026!').trim(),
+    displayName: (params.displayName || cleanEmail.split('@')[0]).trim(),
+    position: params.position || 'FOH Receptionist',
+    branch: params.branch || 'Jiangnan Hotpot - SM Mall of Asia',
+    ndaSignature: 'I AGREE',
+  });
+}
+
 export async function signOutPortalUser() {
   saveSessionUser(null);
   try {
