@@ -31,8 +31,15 @@ service cloud.firestore {
     function isAdmin() {
       return isVerifiedUser() && (
         request.auth.token.email == 'johndavedeleon005@gmail.com' ||
+        request.auth.token.email == 'master@jiangnanhotpot.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
+    }
+
+    function isApprovedStaff() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved';
     }
 
     // 3. Entity Validation Blueprints
@@ -185,17 +192,14 @@ service cloud.firestore {
         (
           resource.data.authorId == request.auth.uid ||
           isAdmin() ||
-          (
-            exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved'
-          )
+          (resource.data.visibility == 'approved_staff' && isApprovedStaff())
         );
 
       allow list: if isSignedIn() &&
         (
-          resource.data.visibility == 'approved_staff' ||
           resource.data.authorId == request.auth.uid ||
-          isAdmin()
+          isAdmin() ||
+          (resource.data.visibility == 'approved_staff' && isApprovedStaff())
         );
 
       allow create: if isVerifiedUser() &&

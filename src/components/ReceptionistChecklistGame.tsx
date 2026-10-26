@@ -481,9 +481,9 @@ function buildStepsForDoc(doc: FoodSafetyDoc): SimulationStep[] {
       options: q.options.map((optText, oIdx) => ({
         id: `${doc.id}-q-${idx}-o-${oIdx}`,
         scriptOrAction: optText,
-        isCorrect: oIdx === q.correctAnswer,
+        isCorrect: oIdx === (q.answerIndex ?? q.correctAnswer ?? 0),
         feedback:
-          oIdx === q.correctAnswer
+          oIdx === (q.answerIndex ?? q.correctAnswer ?? 0)
             ? `Correct! ${q.explanation}`
             : `Incorrect. ${q.explanation}`,
       })),
@@ -491,26 +491,27 @@ function buildStepsForDoc(doc: FoodSafetyDoc): SimulationStep[] {
   }
 
   return doc.sections.map((sec, idx) => {
-    const primaryLine = sec.items[0] || sec.content || doc.summary;
+    const sectionTitle = sec.title || sec.heading || `Section ${idx + 1}`;
+    const primaryLine = sec.bulletPoints?.[0] || sec.items?.[0] || sec.content || doc.summary;
     return {
       id: `${doc.id}-sec-${idx + 1}`,
       stageLabel: `STAGE ${idx + 1}`,
-      scenarioTitle: sec.heading,
+      scenarioTitle: sectionTitle,
       guestAvatar: '📋',
       guestName: `Station Lead (${doc.category})`,
-      guestContext: `Executing ${doc.code} — ${sec.heading}`,
-      guestDialogue: `"We are now at ${sec.heading}. What is the mandatory standard under ${doc.code}?"`,
-      taskPrompt: `Select the compliant action for ${sec.heading}:`,
+      guestContext: `Executing ${doc.code} — ${sectionTitle}`,
+      guestDialogue: `"We are now at ${sectionTitle}. What is the mandatory standard under ${doc.code}?"`,
+      taskPrompt: `Select the compliant action for ${sectionTitle}:`,
       options: [
         {
           id: `${doc.id}-s-${idx}-a`,
           scriptOrAction: primaryLine,
           isCorrect: true,
-          feedback: `Correct! Per ${doc.code} (${sec.heading}): ${primaryLine}`,
+          feedback: `Correct! Per ${doc.code} (${sectionTitle}): ${primaryLine}`,
         },
         {
           id: `${doc.id}-s-${idx}-b`,
-          scriptOrAction: `Skip ${sec.heading} during peak hours and log it at closing.`,
+          scriptOrAction: `Skip ${sectionTitle} during peak hours and log it at closing.`,
           isCorrect: false,
           feedback: `Incorrect. ${doc.code} requires strict real-time execution: ${primaryLine}`,
         },
@@ -518,7 +519,7 @@ function buildStepsForDoc(doc: FoodSafetyDoc): SimulationStep[] {
           id: `${doc.id}-s-${idx}-c`,
           scriptOrAction: `Perform a partial visual check without following ${doc.code} verification.`,
           isCorrect: false,
-          feedback: `Incorrect. All steps in ${sec.heading} must be completed in full.`,
+          feedback: `Incorrect. All steps in ${sectionTitle} must be completed in full.`,
         },
       ],
     };
@@ -592,7 +593,7 @@ export const ReceptionistChecklistGame: React.FC<ReceptionistChecklistGameProps>
     if (activeCustomDoc && activeCustomDoc.sections.length >= 2) {
       return activeCustomDoc.sections.map((sec, idx) => ({
         order: idx + 1,
-        title: sec.heading.replace(/^\d+\.\s*/, ''),
+        title: (sec.title || sec.heading || `Step ${idx + 1}`).replace(/^\d+\.\s*/, ''),
       }));
     }
     return activeScenarios.map((step, idx) => ({

@@ -199,13 +199,20 @@ export default function App() {
     }
   }, [currentUser?.role]);
 
-  useEffect(() => {
-    loadPortalCustomDocs();
-  }, [loadPortalCustomDocs]);
+  const isApprovedUser =
+    !!currentUser && (currentUser.role === 'master' || currentUser.status === 'approved');
 
   useEffect(() => {
-    loadPendingApprovals();
-  }, [loadPendingApprovals, activeTab]);
+    if (isApprovedUser) {
+      loadPortalCustomDocs();
+    }
+  }, [isApprovedUser, loadPortalCustomDocs]);
+
+  useEffect(() => {
+    if (isApprovedUser) {
+      loadPendingApprovals();
+    }
+  }, [isApprovedUser, loadPendingApprovals, activeTab]);
 
   // Verify user approval status on mount if signed in as non-master
   useEffect(() => {
@@ -390,9 +397,17 @@ export default function App() {
   const checklistsCount = documents.filter((d) => d.type === 'checklist').length;
   const customUploadedCount = documents.filter((d) => d.isCustom).length;
 
-  // Require approved account (or Master Account) after NDA is accepted
-  const isApprovedUser =
-    !!currentUser && (currentUser.role === 'master' || currentUser.status === 'approved');
+  // STRICT PRIVATE HUB GATEKEEPER:
+  // Zero hub content, headers, documents, or modals are rendered unless the user is signed in AND approved (or Master Account)
+  if (!isApprovedUser) {
+    return (
+      <AuthGateModal
+        currentUser={currentUser}
+        onAuthenticated={handleAuthenticated}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex justify-center selection:bg-red-500 selection:text-white">
@@ -1022,12 +1037,13 @@ export default function App() {
           onAgreeNDA={handleAgreeNDA}
         />
 
-        {/* Sign-In & Master Account Approval Gate Modal */}
-        {hasAgreedNDA && (!isApprovedUser || isAuthModalOpen) && (
+        {/* Account Switch / Re-Auth Modal when opened from header */}
+        {isAuthModalOpen && (
           <AuthGateModal
             currentUser={currentUser}
             onAuthenticated={handleAuthenticated}
             onSignOut={handleSignOut}
+            onClose={() => setIsAuthModalOpen(false)}
           />
         )}
       </div>

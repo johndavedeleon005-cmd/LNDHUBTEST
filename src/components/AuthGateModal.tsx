@@ -7,9 +7,6 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
-  KeyRound,
-  Copy,
-  Check,
   RefreshCw,
   LogOut,
   Building2,
@@ -20,10 +17,10 @@ import {
   Flame,
   Eye,
   EyeOff,
+  X,
 } from 'lucide-react';
 import { PortalUser } from '../types/foodSafety';
 import {
-  MASTER_ACCOUNT_DETAILS,
   signInWithCredentials,
   registerStaffAccount,
   signInWithGoogleAccount,
@@ -34,6 +31,7 @@ interface AuthGateModalProps {
   currentUser: PortalUser | null;
   onAuthenticated: (user: PortalUser) => void;
   onSignOut: () => void;
+  onClose?: () => void;
 }
 
 const BRANCH_OPTIONS = [
@@ -62,6 +60,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   currentUser,
   onAuthenticated,
   onSignOut,
+  onClose,
 }) => {
   const [mode, setMode] = useState<'signin' | 'register'>('signin');
   const [identifier, setIdentifier] = useState('');
@@ -77,27 +76,13 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-
-  const handleCopy = (value: string, key: string) => {
-    navigator.clipboard?.writeText(value).catch(() => {});
-    setCopiedField(key);
-    setTimeout(() => setCopiedField(null), 1800);
-  };
-
-  const handleQuickFillMaster = () => {
-    setMode('signin');
-    setIdentifier(MASTER_ACCOUNT_DETAILS.email);
-    setPassword(MASTER_ACCOUNT_DETAILS.password);
-    setError(null);
-  };
 
   const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!identifier.trim() || !password.trim()) {
-      setError('Please enter your Email / Master ID and Password.');
+      setError('Please enter your authorized Email / Employee ID and Password.');
       return;
     }
     setLoading(true);
@@ -106,7 +91,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
       const user = await signInWithCredentials(identifier, password);
       onAuthenticated(user);
     } catch (err: any) {
-      setError(err.message || 'Sign in failed. Please check your credentials.');
+      setError(err.message || 'Authentication failed. Please verify your credentials.');
     } finally {
       setLoading(false);
     }
@@ -125,16 +110,16 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const newUser = await registerStaffAccount({
-        displayName: regName,
+      const user = await registerStaffAccount({
         email: regEmail,
         password: regPassword,
+        displayName: regName,
         position: regPosition,
         branch: regBranch,
       });
-      onAuthenticated(newUser);
+      onAuthenticated(user);
     } catch (err: any) {
-      setError(err.message || 'Account creation failed.');
+      setError(err.message || 'Account registration failed.');
     } finally {
       setLoading(false);
     }
@@ -147,11 +132,12 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
       const user = await signInWithGoogleAccount(regPosition, regBranch);
       onAuthenticated(user);
     } catch (err: any) {
-      setError(
-        err.message?.includes('popup-closed')
-          ? 'Google sign-in popup was closed. You can also sign in using the Master or Staff credentials below.'
-          : err.message || 'Google sign-in failed.'
-      );
+      if (err.code !== 'auth/popup-closed-by-user') {
+        setError(
+          err.message ||
+            'Google Sign-In could not be completed. You may also sign in with your Portal Email & Password.'
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -165,88 +151,82 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
       const updated = await checkCurrentAccountStatus(currentUser);
       onAuthenticated(updated);
       if (updated.status === 'pending') {
-        setStatusMessage('Still awaiting Master Account approval. Sign in as the Master Account to approve this request.');
-      } else if (updated.status === 'approved') {
-        setStatusMessage('Account approved! Entering portal...');
+        setStatusMessage(
+          'Your account is still awaiting approval from the Master Account. Please contact L&D Administration.'
+        );
+      } else if (updated.status === 'rejected') {
+        setStatusMessage('Your account request was declined by the Master Account.');
       }
+    } catch {
+      setStatusMessage('Unable to reach server. Please try again shortly.');
     } finally {
       setCheckingStatus(false);
     }
   };
 
   // =========================================================================
-  // VIEW 1: ACCOUNT PENDING OR REJECTED BY MASTER ACCOUNT
+  // VIEW 1: ACCOUNT PENDING OR REJECTED BY MASTER ACCOUNT (STRICT LOCKOUT)
   // =========================================================================
-  if (currentUser && currentUser.status !== 'approved') {
+  if (currentUser && currentUser.role !== 'master' && currentUser.status !== 'approved') {
     const isRejected = currentUser.status === 'rejected';
 
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl overflow-hidden bg-black ring-1 ring-red-500/50 flex-shrink-0">
-                <img
-                  src="./assets/aistudio/JN_HOTPOT_LOGO_d76d212e.webp"
-                  alt="Jiangnan Hotpot Logo"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <div>
-                <span className="text-[11px] font-mono text-amber-400 font-semibold">
-                  Imperial Kitchen Group Inc. · L&D Security Gate
-                </span>
-                <h1 className="text-base font-extrabold text-white">
-                  {isRejected ? 'Account Access Declined' : 'Awaiting Master Account Approval'}
-                </h1>
-              </div>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 select-none">
+        <div className="max-w-lg w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          {/* Header */}
+          <div className="flex items-start gap-4">
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
+                isRejected
+                  ? 'bg-red-950/80 border-red-500/40 text-red-400'
+                  : 'bg-amber-950/80 border-amber-500/40 text-amber-400'
+              }`}
+            >
+              {isRejected ? <XCircle className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
             </div>
-          </div>
-
-          <div
-            className={`p-4 rounded-2xl border ${
-              isRejected
-                ? 'bg-red-950/40 border-red-800/60 text-red-200'
-                : 'bg-amber-950/30 border-amber-700/50 text-amber-100'
-            } space-y-2`}
-          >
-            <div className="flex items-center gap-2 font-bold text-sm">
-              {isRejected ? (
-                <XCircle className="w-5 h-5 text-red-400 shrink-0" />
-              ) : (
-                <Clock className="w-5 h-5 text-amber-400 shrink-0" />
-              )}
-              <span>
-                {isRejected
-                  ? 'Your registration request was declined by the Master Account.'
-                  : 'Your staff account has been created and is queued for Master Account approval.'}
+            <div>
+              <span
+                className={`inline-block text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded font-bold mb-1 ${
+                  isRejected
+                    ? 'bg-red-950 text-red-300 border border-red-800'
+                    : 'bg-amber-950 text-amber-300 border border-amber-800'
+                }`}
+              >
+                {isRejected ? 'ACCESS DECLINED' : 'PRIVATE PORTAL • PENDING MASTER APPROVAL'}
               </span>
+              <h2 className="text-lg sm:text-xl font-black text-white">
+                {isRejected
+                  ? 'Account Access Request Declined'
+                  : 'Account Awaiting Master Account Approval'}
+              </h2>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                {isRejected
+                  ? 'Your staff account registration was declined by the Master Account administrator. Portal access remains locked.'
+                  : 'This training hub is strictly private. Your account has been registered and is locked until the Master Account administrator approves your access.'}
+              </p>
             </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              {isRejected
-                ? 'Please contact the Learning & Development Master Administrator to review your staff access permissions.'
-                : 'For confidentiality and food safety security, all newly created staff accounts must be approved by the Master Account before accessing SOPs, Policies, Guides, Station Checklists, AI Support, and Training Games.'}
-            </p>
           </div>
 
-          {/* Account Summary Table */}
+          {/* Account Summary Card */}
           <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2 text-xs">
-            <div className="flex items-center justify-between py-1 border-b border-slate-900">
-              <span className="text-slate-400">Employee Name</span>
+            <div className="flex justify-between py-1 border-b border-slate-800/80">
+              <span className="text-slate-400">Staff Name:</span>
               <span className="font-bold text-white">{currentUser.displayName}</span>
             </div>
-            <div className="flex items-center justify-between py-1 border-b border-slate-900">
-              <span className="text-slate-400">Email / Employee ID</span>
+            <div className="flex justify-between py-1 border-b border-slate-800/80">
+              <span className="text-slate-400">Email / ID:</span>
               <span className="font-mono text-slate-200">{currentUser.email}</span>
             </div>
-            <div className="flex items-center justify-between py-1 border-b border-slate-900">
-              <span className="text-slate-400">Position & Branch</span>
-              <span className="text-slate-200 text-right">
-                {currentUser.position} · {currentUser.branch}
-              </span>
+            <div className="flex justify-between py-1 border-b border-slate-800/80">
+              <span className="text-slate-400">Position:</span>
+              <span className="text-slate-200">{currentUser.position}</span>
             </div>
-            <div className="flex items-center justify-between py-1">
-              <span className="text-slate-400">Approval Status</span>
+            <div className="flex justify-between py-1 border-b border-slate-800/80">
+              <span className="text-slate-400">Assigned Branch:</span>
+              <span className="text-slate-200">{currentUser.branch}</span>
+            </div>
+            <div className="flex justify-between py-1">
+              <span className="text-slate-400">Approval Status:</span>
               <span className="font-mono font-bold text-amber-400 uppercase">
                 {currentUser.status}
               </span>
@@ -274,28 +254,13 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
               </button>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button
-                onClick={async () => {
-                  onSignOut();
-                  setMode('signin');
-                  setIdentifier(MASTER_ACCOUNT_DETAILS.email);
-                  setPassword(MASTER_ACCOUNT_DETAILS.password);
-                }}
-                className="py-2.5 px-3 rounded-xl bg-red-950/70 hover:bg-red-900/70 text-red-200 border border-red-800/60 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                <span>Sign In as Master to Approve</span>
-              </button>
-
-              <button
-                onClick={onSignOut}
-                className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Sign Out / Back to Login</span>
-              </button>
-            </div>
+            <button
+              onClick={onSignOut}
+              className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out / Return to Login</span>
+            </button>
           </div>
         </div>
       </div>
@@ -303,12 +268,22 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   }
 
   // =========================================================================
-  // VIEW 2: SIGN IN / CREATE ACCOUNT GATE
+  // VIEW 2: PRIVATE SIGN IN / CREATE STAFF ACCOUNT GATE
   // =========================================================================
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-        {/* Left Column: Brand & Master Account Details Reference Card */}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 select-none">
+      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch relative">
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 z-20 p-2 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+            title="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Left Column: Private Corporate Security Banner */}
         <div className="lg:col-span-5 bg-gradient-to-br from-red-950/90 via-slate-900 to-slate-950 border border-red-800/40 rounded-3xl p-5 sm:p-6 flex flex-col justify-between space-y-5 shadow-2xl">
           <div className="space-y-4">
             <div className="flex items-center gap-3">
@@ -325,87 +300,51 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                   <span>Imperial Kitchen Group Inc.</span>
                 </div>
                 <h1 className="text-lg font-black text-white tracking-tight">
-                  IKQA & L&D Training Hub
+                  IKQA &amp; L&amp;D Training Hub
                 </h1>
               </div>
             </div>
 
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-950/90 border border-red-700/60 text-red-200 text-[11px] font-bold">
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
+              <span>STRICTLY PRIVATE INTERNAL PORTAL</span>
+            </div>
+
             <p className="text-xs text-slate-300 leading-relaxed">
-              Sign in with the Master Account to approve newly registered staff accounts and upload SOPs, Policies, Guides, and Station Checklists with automatic AI & Training Game integration.
+              Access to Imperial Kitchen Group Inc. and Jiangnan Hotpot SOPs, Policies, Station Checklists, AI Virtual Support, and Training Simulators is strictly restricted to authenticated and Master-approved personnel.
             </p>
 
-            {/* Master Account Credentials Box */}
-            <div className="bg-slate-950/90 border border-amber-500/40 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Master Account Credentials</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={handleQuickFillMaster}
-                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] transition-colors cursor-pointer"
-                >
-                  Auto-Fill Master
-                </button>
+            <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 space-y-2.5 text-xs">
+              <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <span>Access &amp; Approval Policy</span>
               </div>
-
-              <div className="space-y-2 text-xs">
-                <div className="flex items-center justify-between gap-2 bg-slate-900/90 px-3 py-2 rounded-xl border border-slate-800">
-                  <div className="min-w-0">
-                    <span className="text-[10px] text-slate-400 block">Master Email / Username</span>
-                    <span className="font-mono font-bold text-white truncate block">
-                      {MASTER_ACCOUNT_DETAILS.email}
-                    </span>
-                    <span className="text-[10px] font-mono text-amber-300">
-                      or ID: {MASTER_ACCOUNT_DETAILS.username}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(MASTER_ACCOUNT_DETAILS.email, 'email')}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 shrink-0 cursor-pointer"
-                    title="Copy Master Email"
-                  >
-                    {copiedField === 'email' ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between gap-2 bg-slate-900/90 px-3 py-2 rounded-xl border border-slate-800">
-                  <div className="min-w-0">
-                    <span className="text-[10px] text-slate-400 block">Master Password</span>
-                    <span className="font-mono font-bold text-emerald-400">
-                      {MASTER_ACCOUNT_DETAILS.password}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(MASTER_ACCOUNT_DETAILS.password, 'pw')}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 shrink-0 cursor-pointer"
-                    title="Copy Master Password"
-                  >
-                    {copiedField === 'pw' ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
-
-                <div className="text-[11px] text-slate-400 pt-1 leading-relaxed">
-                  • <strong className="text-slate-200">Master Capabilities:</strong> Approve/Reject staff accounts, upload SOPs, Policies, Guides & Station Checklists, auto-sync with AI Support & Games.
-                </div>
-              </div>
+              <ul className="space-y-2 text-[11px] text-slate-300 leading-relaxed">
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Approved Personnel:</strong> Sign in with your verified credentials or authorized Google account to unlock the training hub.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>New Staff Registration:</strong> Newly created accounts remain locked in <em>Pending</em> status until approved by the Master Account.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Lock className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Master Account Control:</strong> Only the Master Account can approve staff registrations and publish new SOPs, Policies, Guides, and Station Checklists.
+                  </span>
+                </li>
+              </ul>
             </div>
           </div>
 
           <div className="pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center justify-between">
-            <span>RA 10611 & PD 856 Compliant</span>
-            <span>Internal L&D Portal</span>
+            <span>RA 10611 &amp; PD 856 Compliant</span>
+            <span>Authorized Personnel Only</span>
           </div>
         </div>
 
@@ -457,15 +396,16 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
               <form onSubmit={handleSignInSubmit} className="space-y-3.5">
                 <div>
                   <label className="text-xs font-semibold text-slate-300 block mb-1.5">
-                    Email Address or Master ID
+                    Email Address or Account ID
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
+                      autoComplete="username"
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
-                      placeholder="master@jiangnanhotpot.com or IKQA-MASTER"
+                      placeholder="Enter your authorized Email or ID"
                       className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-600 focus:outline-none"
                     />
                   </div>
@@ -479,9 +419,10 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                     <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Enter Master or Staff password"
+                      placeholder="Enter your password"
                       className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl pl-10 pr-10 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-600 focus:outline-none"
                     />
                     <button
@@ -500,42 +441,13 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                   className="w-full py-3 px-4 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-colors cursor-pointer"
                 >
                   <LogIn className="w-4 h-4" />
-                  <span>{loading ? 'Signing In...' : 'Sign In to L&D Portal'}</span>
+                  <span>{loading ? 'Authenticating...' : 'Sign In to Private L&D Hub'}</span>
                 </button>
-
-                {/* Quick Demo Account Buttons */}
-                <div className="pt-2 border-t border-slate-800/80 space-y-2">
-                  <span className="text-[11px] text-slate-400 block">
-                    Quick Sign-In Presets (Master & Sample Staff):
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={handleQuickFillMaster}
-                      className="py-2 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <KeyRound className="w-3.5 h-3.5" />
-                      <span>Fill Master Account</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIdentifier('maria.santos@jiangnanhotpot.com');
-                        setPassword('Staff2026!');
-                        setError(null);
-                      }}
-                      className="py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Fill Approved Staff (Maria)</span>
-                    </button>
-                  </div>
-                </div>
               </form>
             ) : (
               <form onSubmit={handleRegisterSubmit} className="space-y-3">
                 <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-700/40 text-[11px] text-amber-200 leading-relaxed">
-                  <strong>Master Approval Required:</strong> Creating a new staff account submits your profile to the Master Account (`master@jiangnanhotpot.com`) for verification before you can access the portal.
+                  <strong>Master Approval Required:</strong> Creating a new staff account submits your registration to the Master Account for verification before you can access the portal.
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

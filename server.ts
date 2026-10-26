@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import os from 'os';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -10,56 +11,13 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-interface DocItem {
-  id?: string;
-  code: string;
-  title: string;
-  type: string;
-  category: string;
-  revision: number;
-  effectiveDate: string;
-  pdfUrl?: string;
-  summary: string;
-  keyTakeaways?: string[];
-  quickRules?: { type: string; title: string; rule: string }[];
-  sections?: { id?: string; title: string; content: string; bulletPoints?: string[] }[];
-  tables?: { title: string; headers: string[]; rows: any[][] }[];
-  signatories?: { preparedBy?: string; reviewedBy?: string[]; approvedBy?: string };
-  changeHistory?: { rev: number; date: string; author: string; purpose: string }[];
-  quizQuestions?: { question: string; options: string[]; answerIndex: number; explanation: string }[];
-  customSimulationSteps?: any[];
-  customHazardSpots?: any[];
-  tags?: string[];
-  isCustom?: boolean;
-  uploadedBy?: string;
-  uploadedAt?: string;
-}
-
-interface StoredAccount {
-  uid: string;
-  email: string;
-  password?: string;
-  displayName: string;
-  position: string;
-  branch: string;
-  role: 'master' | 'staff';
-  status: 'pending' | 'approved' | 'rejected';
-  createdAt: string;
-  updatedAt: string;
-  authProvider?: 'master_credentials' | 'staff_credentials' | 'google';
-}
-
-interface PortalStoreData {
-  accounts: StoredAccount[];
-  customDocuments: DocItem[];
-}
-
 // Safe server-side loading of documents catalog
 const docsJsonPath = path.join(__dirname, 'src', 'data', 'foodSafetyDocuments.json');
-const INITIAL_FOOD_SAFETY_DOCUMENTS: DocItem[] = JSON.parse(fs.readFileSync(docsJsonPath, 'utf8'));
+const INITIAL_FOOD_SAFETY_DOCUMENTS: any[] = JSON.parse(fs.readFileSync(docsJsonPath, 'utf8'));
 
-// Persistent store path for accounts & Master-uploaded documents
+// Persistent store path for accounts & Master-uploaded documents (with /tmp fallback for read-only Cloud Run containers)
 const storeJsonPath = path.join(__dirname, 'src', 'data', 'portalStore.json');
+const tmpStoreJsonPath = path.join(os.tmpdir(), 'ikqa_portalStore.json');
 
 export const MASTER_CREDENTIALS = {
   email: 'master@jiangnanhotpot.com',
@@ -71,7 +29,7 @@ export const MASTER_CREDENTIALS = {
   branch: 'Imperial Kitchen Group HQ - L&D Department',
 };
 
-const DEFAULT_PORTAL_STORE: PortalStoreData = {
+const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[] } = {
   accounts: [
     {
       uid: 'master-admin-001',
@@ -116,32 +74,43 @@ const DEFAULT_PORTAL_STORE: PortalStoreData = {
   customDocuments: [],
 };
 
-function loadPortalStore(): PortalStoreData {
-  try {
-    if (fs.existsSync(storeJsonPath)) {
-      const raw = JSON.parse(fs.readFileSync(storeJsonPath, 'utf8'));
-      return {
-        accounts: Array.isArray(raw.accounts) && raw.accounts.length > 0 ? raw.accounts : DEFAULT_PORTAL_STORE.accounts,
-        customDocuments: Array.isArray(raw.customDocuments) ? raw.customDocuments : [],
-      };
+function loadPortalStore(): { accounts: any[]; customDocuments: any[] } {
+  for (const candidatePath of [tmpStoreJsonPath, storeJsonPath]) {
+    try {
+      if (fs.existsSync(candidatePath)) {
+        const raw = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+        return {
+          accounts:
+            Array.isArray(raw.accounts) && raw.accounts.length > 0
+              ? raw.accounts
+              : DEFAULT_PORTAL_STORE.accounts,
+          customDocuments: Array.isArray(raw.customDocuments) ? raw.customDocuments : [],
+        };
+      }
+    } catch (err) {
+      console.warn(`Could not load ${candidatePath}, trying fallback:`, err);
     }
-  } catch (err) {
-    console.warn('Could not load portalStore.json, using default store:', err);
   }
   return JSON.parse(JSON.stringify(DEFAULT_PORTAL_STORE));
 }
 
-let portalStore: PortalStoreData = loadPortalStore();
+const portalStore = loadPortalStore();
 
 function savePortalStore() {
+  const payload = JSON.stringify(portalStore, null, 2);
   try {
-    fs.writeFileSync(storeJsonPath, JSON.stringify(portalStore, null, 2), 'utf8');
+    fs.writeFileSync(storeJsonPath, payload, 'utf8');
+  } catch {
+    // Fallback for read-only container filesystems in Cloud Run
+  }
+  try {
+    fs.writeFileSync(tmpStoreJsonPath, payload, 'utf8');
   } catch (err) {
-    console.warn('Could not write portalStore.json:', err);
+    console.warn('Could not write temporary portalStore:', err);
   }
 }
 
-function sanitizeAccount(acc: StoredAccount) {
+function sanitizeAccount(acc: any) {
   const { password: _pw, ...safe } = acc;
   return safe;
 }
@@ -167,31 +136,36 @@ function getGenAI(): GoogleGenAI {
   return aiInstance;
 }
 
-function getAllCombinedDocuments(clientCustomDocs?: DocItem[]): DocItem[] {
-  const customMap = new Map<string, DocItem>();
+function getAllCombinedDocuments(clientCustomDocs?: any[]): any[] {
+  const customMap = new Map<string, any>();
   for (const doc of portalStore.customDocuments) {
-    customMap.set(doc.code.toUpperCase(), doc);
+    if (doc && doc.code) {
+      customMap.set(String(doc.code).toUpperCase(), doc);
+    }
   }
   if (Array.isArray(clientCustomDocs)) {
     for (const doc of clientCustomDocs) {
       if (doc && doc.code) {
-        customMap.set(doc.code.toUpperCase(), doc);
+        customMap.set(String(doc.code).toUpperCase(), doc);
       }
     }
   }
   return [...INITIAL_FOOD_SAFETY_DOCUMENTS, ...Array.from(customMap.values())];
 }
 
-function buildDocumentsGroundingBrief(allDocs: DocItem[]): string {
+function buildDocumentsGroundingBrief(allDocs: any[]): string {
   return allDocs
-    .map((doc: DocItem) => {
-      const takeaways = (doc.keyTakeaways || []).map((t: string) => `  * ${t}`).join('\n');
+    .map((doc: any) => {
+      const takeaways = (doc.keyTakeaways || []).map((t: any) => `  * ${t}`).join('\n');
       const rules = (doc.quickRules || [])
-        .map((r: { type: string; title: string; rule: string }) => `  * [${r.type.toUpperCase()}] ${r.title}: ${r.rule}`)
+        .map((r: any) => `  * [${String(r.type || 'info').toUpperCase()}] ${r.title}: ${r.rule}`)
         .join('\n');
       const sectionsBrief = (doc.sections || [])
-        .map((s: { title: string; content: string; bulletPoints?: string[] }) => {
-          const bullets = s.bulletPoints && s.bulletPoints.length > 0 ? `\n    - ${s.bulletPoints.join('\n    - ')}` : '';
+        .map((s: any) => {
+          const bullets =
+            s.bulletPoints && s.bulletPoints.length > 0
+              ? `\n    - ${s.bulletPoints.join('\n    - ')}`
+              : '';
           return `  - ${s.title}: ${s.content}${bullets}`;
         })
         .join('\n');
@@ -200,9 +174,9 @@ function buildDocumentsGroundingBrief(allDocs: DocItem[]): string {
           ? `  Tables:\n` +
             doc.tables
               .map(
-                (t: { title: string; headers: string[]; rows: any[][] }) =>
-                  `    Table "${t.title}": ${t.headers.join(' | ')} -> ${t.rows
-                    .map((r: any[]) => r.join(' / '))
+                (t: any) =>
+                  `    Table "${t.title}": ${(t.headers || []).join(' | ')} -> ${(t.rows || [])
+                    .map((r: any) => r.join(' / '))
                     .slice(0, 5)
                     .join('; ')}`
               )
@@ -210,7 +184,7 @@ function buildDocumentsGroundingBrief(allDocs: DocItem[]): string {
           : '';
 
       return `### DOCUMENT: ${doc.code} - ${doc.title}${doc.isCustom ? ' [MASTER ACCOUNT UPLOADED]' : ''}
-* Type: ${doc.type.toUpperCase()} | Category: ${doc.category} | Rev: ${doc.revision} | Effective: ${doc.effectiveDate}
+* Type: ${String(doc.type || 'sop').toUpperCase()} | Category: ${doc.category} | Rev: ${doc.revision} | Effective: ${doc.effectiveDate}
 * Official Summary: ${doc.summary}
 * Key Takeaways:
 ${takeaways}
@@ -228,24 +202,26 @@ ${tablesBrief}
 }
 
 function getRuleFallbackAnswer(
-  query: string,
-  contextDocTitle?: string,
-  contextDocContent?: string,
-  customDocs?: DocItem[]
+  query: any,
+  _contextDocTitle?: any,
+  _contextDocContent?: any,
+  customDocs?: any[]
 ): string {
-  const q = query.toLowerCase().trim();
+  const q = String(query || '').toLowerCase().trim();
   const allDocs = getAllCombinedDocuments(customDocs);
-  const customUploadedList = allDocs.filter((d) => d.isCustom);
+  const customUploadedList = allDocs.filter((d: any) => d.isCustom);
 
   // 0. Check custom uploaded documents first so newly uploaded SOPs, Policies, Guides, and Station Checklists match immediately
   for (const cDoc of customUploadedList) {
-    const codeMatch = q.includes(cDoc.code.toLowerCase());
-    const titleWords = cDoc.title
+    const codeMatch = q.includes(String(cDoc.code || '').toLowerCase());
+    const titleWords = String(cDoc.title || '')
       .toLowerCase()
       .split(/\s+/)
-      .filter((w) => w.length > 3);
-    const titleHit = titleWords.some((w) => q.includes(w));
-    const tagHit = (cDoc.tags || []).some((t) => t.length > 2 && q.includes(t.toLowerCase()));
+      .filter((w: string) => w.length > 3);
+    const titleHit = titleWords.some((w: string) => q.includes(w));
+    const tagHit = (cDoc.tags || []).some(
+      (t: any) => String(t).length > 2 && q.includes(String(t).toLowerCase())
+    );
     if (codeMatch || titleHit || tagHit) {
       return formatDocumentDirectAnswer(cDoc);
     }
@@ -256,7 +232,7 @@ function getRuleFallbackAnswer(
     const customNote =
       customUploadedList.length > 0
         ? ` plus **${customUploadedList.length} Master-Uploaded custom document(s)** (${customUploadedList
-            .map((d) => d.code)
+            .map((d: any) => d.code)
             .join(', ')})`
         : '';
     return `Hello! I am your **L&D Virtual Support** for **Jiangnan Hotpot / Imperial Kitchen Group Inc.**
@@ -312,7 +288,9 @@ I cover all **${allDocs.length} official documents** (Station Checklist **JNLD-C
   if (sopCodeMatch) {
     const sopNum = parseInt(sopCodeMatch[1], 10);
     const targetCode = `IKQA-SOP#${sopNum.toString().padStart(3, '0')}`;
-    const matchedDoc = allDocs.find((d) => d.code.toUpperCase() === targetCode.toUpperCase());
+    const matchedDoc = allDocs.find(
+      (d: any) => String(d.code).toUpperCase() === targetCode.toUpperCase()
+    );
     if (matchedDoc) {
       return formatDocumentDirectAnswer(matchedDoc);
     }
@@ -321,17 +299,21 @@ I cover all **${allDocs.length} official documents** (Station Checklist **JNLD-C
   if (policyCodeMatch) {
     const policyNum = parseInt(policyCodeMatch[1], 10);
     const targetCode = `IKQAP#${policyNum.toString().padStart(3, '0')}`;
-    const matchedDoc = allDocs.find((d) => d.code.toUpperCase() === targetCode.toUpperCase());
+    const matchedDoc = allDocs.find(
+      (d: any) => String(d.code).toUpperCase() === targetCode.toUpperCase()
+    );
     if (matchedDoc) {
       return formatDocumentDirectAnswer(matchedDoc);
     }
   }
 
   // 3. Search all documents (including custom uploaded)
-  const keywordDoc = allDocs.find((d: DocItem) => {
-    const codeMatch = d.code.toLowerCase().includes(q) || q.includes(d.code.toLowerCase());
-    const titleMatch = d.title.toLowerCase().includes(q);
-    const tagMatch = (d.tags || []).some((t: string) => q.includes(t.toLowerCase()));
+  const keywordDoc = allDocs.find((d: any) => {
+    const codeStr = String(d.code || '').toLowerCase();
+    const titleStr = String(d.title || '').toLowerCase();
+    const codeMatch = codeStr.includes(q) || q.includes(codeStr);
+    const titleMatch = titleStr.includes(q);
+    const tagMatch = (d.tags || []).some((t: any) => q.includes(String(t).toLowerCase()));
     return codeMatch || titleMatch || tagMatch;
   });
 
@@ -349,15 +331,17 @@ Covering all **${allDocs.length} documents** in the L&D Training Hub:
 * **Storage & Inventory:** FEFO strictly overrides FIFO (IKQA-SOP#004); 48-hr near expiry prioritization.`;
 }
 
-function formatDocumentDirectAnswer(doc: DocItem): string {
-  const takeaways = (doc.keyTakeaways || []).map((t: string) => `* ${t}`).join('\n');
-  const rules = (doc.quickRules || []).map((r: any) => `* **[${r.type.toUpperCase()}] ${r.title}:** ${r.rule}`).join('\n');
+function formatDocumentDirectAnswer(doc: any): string {
+  const takeaways = (doc.keyTakeaways || []).map((t: any) => `* ${t}`).join('\n');
+  const rules = (doc.quickRules || [])
+    .map((r: any) => `* **[${String(r.type || 'info').toUpperCase()}] ${r.title}:** ${r.rule}`)
+    .join('\n');
   const sectionsText = (doc.sections || [])
     .slice(0, 5)
-    .map((s) => `* **${s.title}:** ${s.content}`)
+    .map((s: any) => `* **${s.title}:** ${s.content}`)
     .join('\n');
   return `### **${doc.code}: ${doc.title}**${doc.isCustom ? ' *(Master Uploaded)*' : ''}
-* **Type:** ${doc.type.toUpperCase()} | **Category:** ${doc.category} | **Revision:** ${doc.revision}
+* **Type:** ${String(doc.type || 'sop').toUpperCase()} | **Category:** ${doc.category} | **Revision:** ${doc.revision}
 * **Summary:** ${doc.summary}
 
 #### **Core Requirements & Key Takeaways:**
@@ -375,7 +359,7 @@ ${rules ? `#### **Mandatory Control Rules:**\n${rules}\n` : ''}
 
 // 1. Direct Sign-In (Master Account or Staff Account)
 app.post('/api/auth/login', (req, res) => {
-  const { identifier, password } = req.body;
+  const { identifier, password } = req.body || {};
   if (!identifier || !password) {
     return res.status(400).json({ error: 'Email/Username and Password are required.' });
   }
@@ -390,7 +374,7 @@ app.post('/api/auth/login', (req, res) => {
       cleanId === MASTER_CREDENTIALS.ownerEmail.toLowerCase()) &&
     cleanPw === MASTER_CREDENTIALS.password
   ) {
-    let masterAcc = portalStore.accounts.find((a) => a.role === 'master');
+    let masterAcc = portalStore.accounts.find((a: any) => a.role === 'master');
     if (!masterAcc) {
       masterAcc = {
         uid: 'master-admin-001',
@@ -413,7 +397,7 @@ app.post('/api/auth/login', (req, res) => {
 
   // Check registered staff accounts
   const matched = portalStore.accounts.find(
-    (a) => a.email.toLowerCase() === cleanId || a.uid.toLowerCase() === cleanId
+    (a: any) => a.email.toLowerCase() === cleanId || a.uid.toLowerCase() === cleanId
   );
 
   if (!matched || (matched.password && matched.password !== cleanPw)) {
@@ -427,13 +411,13 @@ app.post('/api/auth/login', (req, res) => {
 
 // 2. Staff Account Registration (Requires Master Account Approval)
 app.post('/api/auth/register', (req, res) => {
-  const { email, password, displayName, position, branch } = req.body;
+  const { email, password, displayName, position, branch } = req.body || {};
   if (!email || !password || !displayName) {
     return res.status(400).json({ error: 'Full Name, Email/Employee ID, and Password are required.' });
   }
 
   const cleanEmail = String(email).trim().toLowerCase();
-  const existing = portalStore.accounts.find((a) => a.email.toLowerCase() === cleanEmail);
+  const existing = portalStore.accounts.find((a: any) => a.email.toLowerCase() === cleanEmail);
   if (existing) {
     return res.status(409).json({
       error: 'An account with this Email / Employee ID already exists. Please sign in instead.',
@@ -444,7 +428,7 @@ app.post('/api/auth/register', (req, res) => {
     cleanEmail === MASTER_CREDENTIALS.email.toLowerCase() ||
     cleanEmail === MASTER_CREDENTIALS.ownerEmail.toLowerCase();
 
-  const newAccount: StoredAccount = {
+  const newAccount = {
     uid: `staff-${Date.now()}`,
     email: cleanEmail,
     password: String(password).trim(),
@@ -466,7 +450,7 @@ app.post('/api/auth/register', (req, res) => {
 
 // 3. Google Sign-In Sync (Automatically recognizes Master email or creates Pending staff account)
 app.post('/api/auth/google-sync', (req, res) => {
-  const { uid, email, displayName, position, branch } = req.body;
+  const { uid, email, displayName, position, branch } = req.body || {};
   if (!uid || !email) {
     return res.status(400).json({ error: 'UID and email are required for Google sync.' });
   }
@@ -477,7 +461,7 @@ app.post('/api/auth/google-sync', (req, res) => {
     cleanEmail === MASTER_CREDENTIALS.email.toLowerCase();
 
   let acc = portalStore.accounts.find(
-    (a) => a.uid === uid || a.email.toLowerCase() === cleanEmail
+    (a: any) => a.uid === uid || a.email.toLowerCase() === cleanEmail
   );
 
   if (!acc) {
@@ -512,7 +496,9 @@ app.post('/api/auth/google-sync', (req, res) => {
 // 4. Get Single Account Status (for pending approval polling)
 app.get('/api/auth/status/:uid', (req, res) => {
   const { uid } = req.params;
-  const acc = portalStore.accounts.find((a) => a.uid === uid || a.email.toLowerCase() === uid.toLowerCase());
+  const acc = portalStore.accounts.find(
+    (a: any) => a.uid === uid || a.email.toLowerCase() === String(uid).toLowerCase()
+  );
   if (!acc) {
     return res.status(404).json({ error: 'Account not found' });
   }
@@ -528,8 +514,8 @@ app.get('/api/auth/accounts', (_req, res) => {
 
 // 6. Master Account Approve / Reject / Update Role
 app.post('/api/auth/approve', (req, res) => {
-  const { targetUid, status, role } = req.body;
-  const acc = portalStore.accounts.find((a) => a.uid === targetUid);
+  const { targetUid, status, role } = req.body || {};
+  const acc = portalStore.accounts.find((a: any) => a.uid === targetUid);
   if (!acc) {
     return res.status(404).json({ error: 'Target account not found.' });
   }
@@ -552,7 +538,9 @@ app.post('/api/auth/approve', (req, res) => {
 // 7. Delete Account (Master Account only)
 app.delete('/api/auth/accounts/:uid', (req, res) => {
   const { uid } = req.params;
-  portalStore.accounts = portalStore.accounts.filter((a) => a.uid !== uid || a.role === 'master');
+  portalStore.accounts = portalStore.accounts.filter(
+    (a: any) => a.uid !== uid || a.role === 'master'
+  );
   savePortalStore();
   return res.json({ accounts: portalStore.accounts.map(sanitizeAccount) });
 });
@@ -566,12 +554,12 @@ app.get('/api/custom-documents', (_req, res) => {
 });
 
 app.post('/api/custom-documents', (req, res) => {
-  const { document } = req.body;
+  const { document } = req.body || {};
   if (!document || !document.code || !document.title) {
     return res.status(400).json({ error: 'Document code and title are required.' });
   }
 
-  const normalizedDoc: DocItem = {
+  const normalizedDoc = {
     ...document,
     id: document.id || `custom-${Date.now()}`,
     isCustom: true,
@@ -579,7 +567,9 @@ app.post('/api/custom-documents', (req, res) => {
   };
 
   const existingIdx = portalStore.customDocuments.findIndex(
-    (d) => d.id === normalizedDoc.id || d.code.toUpperCase() === normalizedDoc.code.toUpperCase()
+    (d: any) =>
+      d.id === normalizedDoc.id ||
+      String(d.code).toUpperCase() === String(normalizedDoc.code).toUpperCase()
   );
 
   if (existingIdx >= 0) {
@@ -598,20 +588,26 @@ app.post('/api/custom-documents', (req, res) => {
 app.delete('/api/custom-documents/:id', (req, res) => {
   const { id } = req.params;
   portalStore.customDocuments = portalStore.customDocuments.filter(
-    (d) => d.id !== id && d.code.toUpperCase() !== id.toUpperCase()
+    (d: any) => d.id !== id && String(d.code).toUpperCase() !== String(id).toUpperCase()
   );
   savePortalStore();
   return res.json({ documents: portalStore.customDocuments });
 });
 
 // Deterministic local fallback parser if Gemini key is unavailable or times out
-function buildDeterministicParsedDocument(rawText: string, hintType?: string, hintCode?: string, hintTitle?: string, hintCategory?: string): DocItem {
-  const lines = rawText
+function buildDeterministicParsedDocument(
+  rawText: any,
+  hintType?: any,
+  hintCode?: any,
+  hintTitle?: any,
+  hintCategory?: any
+): any {
+  const lines = String(rawText || '')
     .split(/\r?\n/)
-    .map((l) => l.trim())
+    .map((l: string) => l.trim())
     .filter(Boolean);
 
-  const docType = (hintType || 'sop') as 'policy' | 'sop' | 'guide' | 'checklist';
+  const docType = ['policy', 'sop', 'guide', 'checklist'].includes(hintType) ? hintType : 'sop';
   const defaultPrefix =
     docType === 'policy'
       ? 'IKQAP'
@@ -621,15 +617,17 @@ function buildDeterministicParsedDocument(rawText: string, hintType?: string, hi
       ? 'IKQA-GDE'
       : 'IKQA-SOP';
   const randomNum = String(portalStore.customDocuments.length + 13).padStart(3, '0');
-  const code = (hintCode || `${defaultPrefix}#${randomNum}`).toUpperCase();
-  const title = hintTitle || lines[0]?.replace(/^[#*\-\s]+/, '').slice(0, 120) || 'Master Uploaded Operational Standard';
+  const code = String(hintCode || `${defaultPrefix}#${randomNum}`).toUpperCase();
+  const title =
+    hintTitle ||
+    lines[0]?.replace(/^[#*\-\s]+/, '').slice(0, 120) ||
+    'Master Uploaded Operational Standard';
   const category =
-    hintCategory ||
-    (docType === 'checklist' ? 'Station Checklists' : 'Operations & Maintenance');
+    hintCategory || (docType === 'checklist' ? 'Station Checklists' : 'Operations & Maintenance');
 
   const bulletLines = lines
-    .filter((l) => /^(\*|\-|\d+\.|•)/.test(l) || l.length > 25)
-    .map((l) => l.replace(/^(\*|\-|\d+\.|•)\s*/, ''))
+    .filter((l: string) => /^(\*|\-|\d+\.|•)/.test(l) || l.length > 25)
+    .map((l: string) => l.replace(/^(\*|\-|\d+\.|•)\s*/, ''))
     .slice(0, 12);
 
   const keyTakeaways =
@@ -641,14 +639,14 @@ function buildDeterministicParsedDocument(rawText: string, hintType?: string, hi
           `Any deviation from ${code} must be corrected immediately and logged on the shift checklist.`,
         ];
 
-  const quickRules = keyTakeaways.slice(0, 3).map((t, i) => ({
+  const quickRules = keyTakeaways.slice(0, 3).map((t: string, i: number) => ({
     type: i === 0 ? 'critical' : i === 1 ? 'warning' : 'info',
     title: `${code} Control Point #${i + 1}`,
     rule: t,
   }));
 
   // Group lines into sections
-  const sections: { id: string; title: string; content: string; bulletPoints: string[] }[] = [];
+  const sections: any[] = [];
   let currentSecTitle = '1. Standard Procedure & Operational Requirements';
   let currentBullets: string[] = [];
 
@@ -672,7 +670,7 @@ function buildDeterministicParsedDocument(rawText: string, hintType?: string, hi
     sections.push({
       id: `sec-${sections.length + 1}`,
       title: currentSecTitle,
-      content: currentBullets.join(' ') || rawText.slice(0, 600),
+      content: currentBullets.join(' ') || String(rawText || '').slice(0, 600),
       bulletPoints: currentBullets.length > 0 ? currentBullets.slice(0, 6) : keyTakeaways,
     });
   }
@@ -706,9 +704,8 @@ function buildDeterministicParsedDocument(rawText: string, hintType?: string, hi
   ];
 
   // Build Interactive Station Simulation Steps for the Station Checklist Game
-  const customSimulationSteps = sections.slice(0, 4).map((sec, idx) => {
-    const rightAction =
-      sec.bulletPoints?.[0] || sec.content.slice(0, 180) || primaryRule;
+  const customSimulationSteps = sections.slice(0, 4).map((sec: any, idx: number) => {
+    const rightAction = sec.bulletPoints?.[0] || sec.content.slice(0, 180) || primaryRule;
     return {
       id: `${code.toLowerCase()}-sim-${idx + 1}`,
       stageLabel: `STAGE ${idx + 1} • ${code}`,
@@ -727,19 +724,22 @@ function buildDeterministicParsedDocument(rawText: string, hintType?: string, hi
         },
         {
           id: `opt-${idx}-b`,
-          scriptOrAction: 'Bypass this step during busy hours and proceed directly to table seating without documentation.',
+          scriptOrAction:
+            'Bypass this step during busy hours and proceed directly to table seating without documentation.',
           isCorrect: false,
           feedback: `Incorrect. ${code} strictly requires: ${rightAction}`,
         },
         {
           id: `opt-${idx}-c`,
-          scriptOrAction: 'Rely on unverified memory without consulting the official checklist or logging the form.',
+          scriptOrAction:
+            'Rely on unverified memory without consulting the official checklist or logging the form.',
           isCorrect: false,
           feedback: `Incorrect. Skipping verification violates ${code}.`,
         },
         {
           id: `opt-${idx}-d`,
-          scriptOrAction: 'Defer the requirement to the next shift lead without completing the current station check.',
+          scriptOrAction:
+            'Defer the requirement to the next shift lead without completing the current station check.',
           isCorrect: false,
           feedback: `Incorrect. Immediate execution is mandatory under ${code}.`,
         },
@@ -785,7 +785,9 @@ function buildDeterministicParsedDocument(rawText: string, hintType?: string, hi
       year: 'numeric',
     }),
     pdfUrl: '',
-    summary: lines.slice(0, 3).join(' ').slice(0, 350) || `Official Master-uploaded ${docType.toUpperCase()} covering ${title}.`,
+    summary:
+      lines.slice(0, 3).join(' ').slice(0, 350) ||
+      `Official Master-uploaded ${docType.toUpperCase()} covering ${title}.`,
     keyTakeaways,
     quickRules,
     sections,
@@ -812,7 +814,7 @@ function buildDeterministicParsedDocument(rawText: string, hintType?: string, hi
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, '')
         .split(/\s+/)
-        .filter((w) => w.length > 3)
+        .filter((w: string) => w.length > 3)
         .slice(0, 6),
     ],
     isCustom: true,
@@ -823,7 +825,7 @@ function buildDeterministicParsedDocument(rawText: string, hintType?: string, hi
 
 // AI Smart Document Parser Endpoint (Extracts structured SOP/Policy/Guide/Checklist + Game & Quiz Scenarios)
 app.post('/api/documents/ai-parse', async (req, res) => {
-  const { rawText, docType = 'sop', code, title, category } = req.body;
+  const { rawText, docType = 'sop', code, title, category } = req.body || {};
   if (!rawText || typeof rawText !== 'string') {
     return res.status(400).json({ error: 'Raw document text or content is required.' });
   }
@@ -832,7 +834,7 @@ app.post('/api/documents/ai-parse', async (req, res) => {
 
   try {
     const prompt = `You are the Imperial Kitchen Group Inc. (Jiangnan Hotpot) L&D Curriculum & Compliance Architect.
-Convert the following uploaded ${docType.toUpperCase()} document content into a structured JSON object so it is automatically integrated into:
+Convert the following uploaded ${String(docType).toUpperCase()} document content into a structured JSON object so it is automatically integrated into:
 1. The Compliance Document Library
 2. The L&D Virtual Support AI Knowledge Base
 3. The Station Checklist Simulator Game (customSimulationSteps)
@@ -975,9 +977,9 @@ ${rawText.slice(0, 12000)}`;
     });
 
     const parsedJson = JSON.parse(response.text || '{}');
-    const mergedDoc: DocItem = {
+    const mergedDoc = {
       ...baseParsed,
-      code: (code || parsedJson.code || baseParsed.code).toUpperCase(),
+      code: String(code || parsedJson.code || baseParsed.code).toUpperCase(),
       title: title || parsedJson.title || baseParsed.title,
       summary: parsedJson.summary || baseParsed.summary,
       keyTakeaways:
@@ -1016,7 +1018,7 @@ ${rawText.slice(0, 12000)}`;
 
     return res.json({ document: mergedDoc, aiStructured: true });
   } catch (err: any) {
-    console.warn('Gemini document parse fallback triggered:', err.message);
+    console.warn('Gemini document parse fallback triggered:', err?.message || err);
     return res.json({ document: baseParsed, aiStructured: false });
   }
 });
@@ -1027,7 +1029,7 @@ ${rawText.slice(0, 12000)}`;
 
 app.post('/api/tts', async (req, res) => {
   try {
-    const { text, voice = 'Kore', style } = req.body;
+    const { text, voice = 'Kore', style } = req.body || {};
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'Text is required for TTS' });
     }
@@ -1073,7 +1075,7 @@ app.post('/api/tts', async (req, res) => {
   } catch (error: any) {
     console.error('Error generating TTS:', error);
     return res.status(500).json({
-      error: error.message || 'Failed to generate speech with Gemini TTS',
+      error: error?.message || 'Failed to generate speech with Gemini TTS',
     });
   }
 });
@@ -1087,7 +1089,7 @@ app.post('/api/chat/stream', async (req, res) => {
     contextDocTitle,
     contextDocContent,
     customDocuments = [],
-  } = req.body;
+  } = req.body || {};
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'Message is required' });
   }
@@ -1153,7 +1155,7 @@ Instructions:
     res.write('data: [DONE]\n\n');
     return res.end();
   } catch (error: any) {
-    console.warn(`Chat streaming failed with ${selectedModel}, falling back:`, error.message);
+    console.warn(`Chat streaming failed with ${selectedModel}, falling back:`, error?.message || error);
     const fallbackText = getRuleFallbackAnswer(message, contextDocTitle, contextDocContent, customDocuments);
     res.write(`data: ${JSON.stringify({ text: fallbackText, isFallback: true })}\n\n`);
     res.write('data: [DONE]\n\n');
@@ -1169,7 +1171,7 @@ app.post('/api/compliance-assistant', async (req, res) => {
     contextDocTitle,
     contextDocContent,
     customDocuments = [],
-  } = req.body;
+  } = req.body || {};
   if (!question || typeof question !== 'string') {
     return res.status(400).json({ error: 'Question is required' });
   }
@@ -1214,7 +1216,7 @@ Instructions:
       getRuleFallbackAnswer(question, contextDocTitle, contextDocContent, customDocuments);
     return res.json({ answer, modelUsed: selectedModel });
   } catch (error: any) {
-    console.warn('Gemini compliance call fallback triggered:', error.message);
+    console.warn('Gemini compliance call fallback triggered:', error?.message || error);
     const fallbackAnswer = getRuleFallbackAnswer(
       question,
       contextDocTitle,
@@ -1238,9 +1240,21 @@ if (process.env.NODE_ENV !== 'production') {
   });
   app.use(vite.middlewares);
 } else {
-  app.use(express.static(path.join(__dirname, 'dist')));
+  const distPath = path.join(__dirname, 'dist');
+  const publicPath = path.join(__dirname, 'public');
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+  }
+  if (fs.existsSync(publicPath)) {
+    app.use(express.static(publicPath));
+  }
   app.get('*', (_req, res) => {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    const distIndex = path.join(distPath, 'index.html');
+    if (fs.existsSync(distIndex)) {
+      res.sendFile(distIndex);
+    } else {
+      res.sendFile(path.join(__dirname, 'index.html'));
+    }
   });
 }
 

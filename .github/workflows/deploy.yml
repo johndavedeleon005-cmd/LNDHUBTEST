@@ -46,6 +46,7 @@ jobs:
         run: |
           if npm install --legacy-peer-deps --no-audit --no-fund; then
             npm run build
+            cp -r public/gh-pages-bundle dist/ 2>/dev/null || true
             cp dist/index.html dist/404.html
             touch dist/.nojekyll
           fi

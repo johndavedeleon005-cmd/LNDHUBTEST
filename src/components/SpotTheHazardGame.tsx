@@ -976,7 +976,11 @@ export const SpotTheHazardGame: React.FC<SpotTheHazardGameProps> = ({
         // Fallback hazard spot generated directly from uploaded document sections/takeaways
         if (customHazards.length < 5) {
           const pos = slotPositions[customHazards.length];
-          const primaryRule = doc.keyTakeaways[0] || doc.sections[0]?.items[0] || doc.summary;
+          const primaryRule =
+            doc.keyTakeaways[0] ||
+            doc.sections[0]?.bulletPoints?.[0] ||
+            doc.sections[0]?.items?.[0] ||
+            doc.summary;
           customHazards.push({
             id: `s5-fallback-${doc.id}`,
             x: pos.x,
@@ -1006,7 +1010,7 @@ export const SpotTheHazardGame: React.FC<SpotTheHazardGameProps> = ({
       const idx = customHazards.length;
       const pos = slotPositions[idx];
       const sec = doc.sections[idx % doc.sections.length];
-      const ruleText = sec?.items[0] || doc.summary;
+      const ruleText = sec?.bulletPoints?.[0] || sec?.items?.[0] || doc.summary;
       customHazards.push({
         id: `s5-pad-${idx}`,
         x: pos.x,
@@ -1016,7 +1020,7 @@ export const SpotTheHazardGame: React.FC<SpotTheHazardGameProps> = ({
         isHazard: true,
         docCode: doc.code,
         docId: doc.id,
-        hazardTitle: `${doc.code}: ${sec?.heading || 'Station Verification'} Deviation`,
+        hazardTitle: `${doc.code}: ${sec?.title || sec?.heading || 'Station Verification'} Deviation`,
         sopViolation: `Unverified station step in ${doc.code}: ${ruleText}`,
         correctFixIndex: 0,
         fixOptions: [

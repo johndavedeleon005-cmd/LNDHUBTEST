@@ -14,8 +14,10 @@ export type DepartmentCategory =
 export interface PolicySection {
   id: string;
   title: string;
+  heading?: string;
   content: string;
   bulletPoints?: string[];
+  items?: string[];
   subsections?: {
     id: string;
     title: string;
@@ -47,6 +49,7 @@ export interface QuizQuestion {
   question: string;
   options: string[];
   answerIndex: number;
+  correctAnswer?: number;
   explanation: string;
 }
 
