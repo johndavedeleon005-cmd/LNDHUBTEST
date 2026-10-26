@@ -23,6 +23,8 @@ import {
   signOutPortalUser,
   fetchServerCustomDocuments,
   fetchAllPortalAccounts,
+  subscribeToPortalAccounts,
+  updateAccountApprovalStatus,
   checkCurrentAccountStatus,
   saveDocumentsToLocalStorage,
 } from './services/authAndUploadService';
@@ -44,6 +46,8 @@ import {
   ClipboardCheck,
   Crown,
   Upload,
+  UserCheck,
+  UserX,
 } from 'lucide-react';
 
 export default function App() {
@@ -51,6 +55,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<PortalUser | null>(() => getSavedSessionUser());
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
+  const [pendingAccountsList, setPendingAccountsList] = useState<PortalUser[]>([]);
 
   // Documents state (persisted with any custom added docs)
   const [documents, setDocuments] = useState<FoodSafetyDoc[]>(() => {
@@ -188,12 +193,14 @@ export default function App() {
   const loadPendingApprovals = useCallback(async () => {
     if (currentUser?.role !== 'master') {
       setPendingApprovalsCount(0);
+      setPendingAccountsList([]);
       return;
     }
     try {
       const accounts = await fetchAllPortalAccounts();
-      const pending = accounts.filter((a) => a.role !== 'master' && a.status === 'pending').length;
-      setPendingApprovalsCount(pending);
+      const pending = accounts.filter((a) => a.role !== 'master' && a.status === 'pending');
+      setPendingApprovalsCount(pending.length);
+      setPendingAccountsList(pending);
     } catch {
       // ignore
     }
@@ -209,10 +216,18 @@ export default function App() {
   }, [isApprovedUser, loadPortalCustomDocs]);
 
   useEffect(() => {
-    if (isApprovedUser) {
-      loadPendingApprovals();
+    if (currentUser?.role !== 'master') {
+      setPendingApprovalsCount(0);
+      setPendingAccountsList([]);
+      return;
     }
-  }, [isApprovedUser, loadPendingApprovals, activeTab]);
+    const unsub = subscribeToPortalAccounts((accounts) => {
+      const pending = accounts.filter((a) => a.role !== 'master' && a.status === 'pending');
+      setPendingApprovalsCount(pending.length);
+      setPendingAccountsList(pending);
+    });
+    return () => unsub();
+  }, [currentUser?.role]);
 
   // Verify user approval status on mount if signed in as non-master
   useEffect(() => {
@@ -468,6 +483,97 @@ export default function App() {
             />
           ) : (
             <div className="p-4 space-y-4">
+              {/* LIVE INCOMING STAFF ACCOUNT APPROVAL REQUESTS BANNER FOR MASTER ACCOUNT */}
+              {currentUser?.role === 'master' &&
+                pendingAccountsList.length > 0 &&
+                activeTab !== 'master' && (
+                  <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/80 border-2 border-amber-500/70 rounded-3xl p-4 shadow-xl space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400 flex items-center justify-center shrink-0">
+                          <UserCheck className="w-5 h-5 text-amber-400" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-mono font-black uppercase tracking-wider text-amber-300 block">
+                            LIVE APPROVAL QUEUE · {pendingAccountsList.length} REQUEST
+                            {pendingAccountsList.length > 1 ? 'S' : ''} AWAITING MASTER APPROVAL
+                          </span>
+                          <h3 className="text-sm font-black text-white">
+                            Incoming Staff Account Creation Request{pendingAccountsList.length > 1 ? 's' : ''}
+                          </h3>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setActiveTab('master')}
+                        className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-500/40 text-amber-300 font-bold text-xs cursor-pointer self-start sm:self-center"
+                      >
+                        View All in Master Hub ({pendingAccountsList.length})
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {pendingAccountsList.slice(0, 3).map((reqAcc) => (
+                        <div
+                          key={reqAcc.uid}
+                          className="p-3 rounded-2xl bg-slate-950/90 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                        >
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs sm:text-sm font-bold text-white">
+                                {reqAcc.displayName}
+                              </span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-950 text-emerald-300 border border-emerald-600/60 text-[10px] font-mono font-bold">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                <span>
+                                  Confidentiality Agreement: Accepted (&quot;{reqAcc.ndaSignature || 'I AGREE'}&quot;)
+                                </span>
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 flex items-center gap-1.5 flex-wrap">
+                              <span className="font-mono text-slate-200">{reqAcc.email}</span>
+                              <span>·</span>
+                              <span>{reqAcc.position}</span>
+                              <span>·</span>
+                              <span>{reqAcc.branch}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={async () => {
+                                const updated = await updateAccountApprovalStatus(reqAcc, 'approved');
+                                const rem = updated.filter(
+                                  (a) => a.role !== 'master' && a.status === 'pending'
+                                );
+                                setPendingApprovalsCount(rem.length);
+                                setPendingAccountsList(rem);
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1 cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Approve Account</span>
+                            </button>
+                            <button
+                              onClick={async () => {
+                                const updated = await updateAccountApprovalStatus(reqAcc, 'rejected');
+                                const rem = updated.filter(
+                                  (a) => a.role !== 'master' && a.status === 'pending'
+                                );
+                                setPendingApprovalsCount(rem.length);
+                                setPendingAccountsList(rem);
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-red-950 hover:bg-red-900 text-red-200 border border-red-800/60 font-semibold text-xs flex items-center gap-1 cursor-pointer"
+                            >
+                              <UserX className="w-3.5 h-3.5" />
+                              <span>Decline</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
               {/* TAB 1: LIBRARY */}
               {activeTab === 'library' && (
                 <div className="space-y-4">

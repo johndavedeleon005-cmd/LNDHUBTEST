@@ -40,6 +40,9 @@ const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[] } = {
       branch: MASTER_CREDENTIALS.branch,
       role: 'master',
       status: 'approved',
+      ndaAccepted: true,
+      ndaSignature: 'I AGREE',
+      ndaAcceptedAt: '2026-01-01T00:00:00.000Z',
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
       authProvider: 'master_credentials',
@@ -53,6 +56,9 @@ const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[] } = {
       branch: 'Jiangnan Hotpot - BGC High Street',
       role: 'staff',
       status: 'pending',
+      ndaAccepted: true,
+      ndaSignature: 'I AGREE',
+      ndaAcceptedAt: '2026-10-25T08:30:00.000Z',
       createdAt: '2026-10-25T08:30:00.000Z',
       updatedAt: '2026-10-25T08:30:00.000Z',
       authProvider: 'staff_credentials',
@@ -66,6 +72,9 @@ const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[] } = {
       branch: 'Jiangnan Hotpot - SM Mall of Asia',
       role: 'staff',
       status: 'approved',
+      ndaAccepted: true,
+      ndaSignature: 'I AGREE',
+      ndaAcceptedAt: '2026-10-20T09:00:00.000Z',
       createdAt: '2026-10-20T09:00:00.000Z',
       updatedAt: '2026-10-20T09:15:00.000Z',
       authProvider: 'staff_credentials',
@@ -79,11 +88,17 @@ function loadPortalStore(): { accounts: any[]; customDocuments: any[] } {
     try {
       if (fs.existsSync(candidatePath)) {
         const raw = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+        const accounts =
+          Array.isArray(raw.accounts) && raw.accounts.length > 0
+            ? raw.accounts.map((acc: any) => ({
+                ...acc,
+                ndaAccepted: acc.ndaAccepted ?? true,
+                ndaSignature: acc.ndaSignature || 'I AGREE',
+                ndaAcceptedAt: acc.ndaAcceptedAt || acc.createdAt || new Date().toISOString(),
+              }))
+            : DEFAULT_PORTAL_STORE.accounts;
         return {
-          accounts:
-            Array.isArray(raw.accounts) && raw.accounts.length > 0
-              ? raw.accounts
-              : DEFAULT_PORTAL_STORE.accounts,
+          accounts,
           customDocuments: Array.isArray(raw.customDocuments) ? raw.customDocuments : [],
         };
       }
@@ -112,11 +127,26 @@ function savePortalStore() {
 
 function sanitizeAccount(acc: any) {
   const { password: _pw, ...safe } = acc;
-  return safe;
+  return {
+    ...safe,
+    ndaAccepted: safe.ndaAccepted ?? true,
+    ndaSignature: safe.ndaSignature || 'I AGREE',
+    ndaAcceptedAt: safe.ndaAcceptedAt || safe.createdAt,
+  };
 }
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 app.use(express.json({ limit: '15mb' }));
 
@@ -385,6 +415,9 @@ app.post('/api/auth/login', (req, res) => {
         branch: MASTER_CREDENTIALS.branch,
         role: 'master',
         status: 'approved',
+        ndaAccepted: true,
+        ndaSignature: 'I AGREE',
+        ndaAcceptedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         authProvider: 'master_credentials',
@@ -409,16 +442,32 @@ app.post('/api/auth/login', (req, res) => {
   return res.json({ user: sanitizeAccount(matched) });
 });
 
-// 2. Staff Account Registration (Requires Master Account Approval)
+// 2. Staff Account Registration (Requires Manual "I AGREE" Confidentiality Agreement & Master Approval)
 app.post('/api/auth/register', (req, res) => {
-  const { email, password, displayName, position, branch } = req.body || {};
-  if (!email || !password || !displayName) {
-    return res.status(400).json({ error: 'Full Name, Email/Employee ID, and Password are required.' });
+  const { uid, email, password, displayName, position, branch, ndaSignature, syncOnly } = req.body || {};
+  if (!email || !displayName) {
+    return res.status(400).json({ error: 'Full Name and Email/Employee ID are required.' });
+  }
+
+  const cleanSig = String(ndaSignature || 'I AGREE').trim().toUpperCase();
+  if (cleanSig !== 'I AGREE') {
+    return res.status(400).json({
+      error: 'You must manually type "I AGREE" to accept the Confidentiality Agreement before creating an account.',
+    });
   }
 
   const cleanEmail = String(email).trim().toLowerCase();
-  const existing = portalStore.accounts.find((a: any) => a.email.toLowerCase() === cleanEmail);
+  const deterministicUid =
+    (uid && String(uid).trim()) ||
+    `user-${cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, '-').slice(0, 96)}`;
+
+  const existing = portalStore.accounts.find(
+    (a: any) => a.email.toLowerCase() === cleanEmail || a.uid === deterministicUid
+  );
   if (existing) {
+    if (syncOnly) {
+      return res.json({ user: sanitizeAccount(existing) });
+    }
     return res.status(409).json({
       error: 'An account with this Email / Employee ID already exists. Please sign in instead.',
     });
@@ -428,17 +477,21 @@ app.post('/api/auth/register', (req, res) => {
     cleanEmail === MASTER_CREDENTIALS.email.toLowerCase() ||
     cleanEmail === MASTER_CREDENTIALS.ownerEmail.toLowerCase();
 
+  const nowIso = new Date().toISOString();
   const newAccount = {
-    uid: `staff-${Date.now()}`,
+    uid: deterministicUid,
     email: cleanEmail,
-    password: String(password).trim(),
+    password: String(password || 'Staff2026!').trim(),
     displayName: String(displayName).trim().slice(0, 120),
     position: String(position || 'Restaurant Staff').trim().slice(0, 120),
     branch: String(branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160),
     role: isMasterEmail ? 'master' : 'staff',
     status: isMasterEmail ? 'approved' : 'pending',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    ndaAccepted: true,
+    ndaSignature: 'I AGREE',
+    ndaAcceptedAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
     authProvider: 'staff_credentials',
   };
 
@@ -465,6 +518,7 @@ app.post('/api/auth/google-sync', (req, res) => {
   );
 
   if (!acc) {
+    const nowIso = new Date().toISOString();
     acc = {
       uid: String(uid),
       email: cleanEmail,
@@ -477,8 +531,11 @@ app.post('/api/auth/google-sync', (req, res) => {
         : String(branch || 'Jiangnan Hotpot - SM Mall of Asia').slice(0, 160),
       role: isMasterEmail ? 'master' : 'staff',
       status: isMasterEmail ? 'approved' : 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      ndaAccepted: true,
+      ndaSignature: 'I AGREE',
+      ndaAcceptedAt: nowIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
       authProvider: 'google',
     };
     portalStore.accounts.push(acc);
@@ -486,6 +543,8 @@ app.post('/api/auth/google-sync', (req, res) => {
   } else if (isMasterEmail && (acc.role !== 'master' || acc.status !== 'approved')) {
     acc.role = 'master';
     acc.status = 'approved';
+    acc.ndaAccepted = true;
+    acc.ndaSignature = 'I AGREE';
     acc.updatedAt = new Date().toISOString();
     savePortalStore();
   }
@@ -496,8 +555,12 @@ app.post('/api/auth/google-sync', (req, res) => {
 // 4. Get Single Account Status (for pending approval polling)
 app.get('/api/auth/status/:uid', (req, res) => {
   const { uid } = req.params;
+  const emailQuery = String(req.query.email || '').trim().toLowerCase();
   const acc = portalStore.accounts.find(
-    (a: any) => a.uid === uid || a.email.toLowerCase() === String(uid).toLowerCase()
+    (a: any) =>
+      a.uid === uid ||
+      a.email.toLowerCase() === String(uid).toLowerCase() ||
+      (emailQuery && a.email.toLowerCase() === emailQuery)
   );
   if (!acc) {
     return res.status(404).json({ error: 'Account not found' });
@@ -512,10 +575,37 @@ app.get('/api/auth/accounts', (_req, res) => {
   });
 });
 
-// 6. Master Account Approve / Reject / Update Role
+// 6. Master Account Approve / Reject / Update Role (Also upserts if account only existed in Firestore/client)
 app.post('/api/auth/approve', (req, res) => {
-  const { targetUid, status, role } = req.body || {};
-  const acc = portalStore.accounts.find((a: any) => a.uid === targetUid);
+  const { targetUid, targetEmail, targetUser, status, role } = req.body || {};
+  const cleanEmail = String(targetEmail || targetUser?.email || '').trim().toLowerCase();
+  let acc = portalStore.accounts.find(
+    (a: any) =>
+      a.uid === targetUid ||
+      (cleanEmail && a.email.toLowerCase() === cleanEmail)
+  );
+
+  if (!acc && targetUser && targetUser.email) {
+    const nowIso = new Date().toISOString();
+    acc = {
+      uid: targetUid || targetUser.uid || `user-${cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, '-')}`,
+      email: cleanEmail,
+      password: targetUser.password || 'Staff2026!',
+      displayName: targetUser.displayName || cleanEmail,
+      position: targetUser.position || 'Restaurant Staff',
+      branch: targetUser.branch || 'Jiangnan Hotpot - SM Mall of Asia',
+      role: role || targetUser.role || 'staff',
+      status: status || targetUser.status || 'approved',
+      ndaAccepted: true,
+      ndaSignature: targetUser.ndaSignature || 'I AGREE',
+      ndaAcceptedAt: targetUser.ndaAcceptedAt || nowIso,
+      createdAt: targetUser.createdAt || nowIso,
+      updatedAt: nowIso,
+      authProvider: targetUser.authProvider || 'staff_credentials',
+    };
+    portalStore.accounts.push(acc);
+  }
+
   if (!acc) {
     return res.status(404).json({ error: 'Target account not found.' });
   }

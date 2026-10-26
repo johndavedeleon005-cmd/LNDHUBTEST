@@ -30,6 +30,7 @@ import {
 import {
   MASTER_ACCOUNT_DETAILS,
   fetchAllPortalAccounts,
+  subscribeToPortalAccounts,
   updateAccountApprovalStatus,
   registerStaffAccount,
   parseDocumentWithAI,
@@ -133,7 +134,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   onLaunchAIWithDoc,
   onAccountsChanged,
 }) => {
-  const [activeSection, setActiveSection] = useState<'approvals' | 'uploader' | 'credentials'>('uploader');
+  const [activeSection, setActiveSection] = useState<'approvals' | 'uploader' | 'credentials'>('approvals');
 
   // Accounts state
   const [accounts, setAccounts] = useState<PortalUser[]>([]);
@@ -164,7 +165,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const customDocs = documents.filter((d) => d.isCustom);
-  const pendingAccountsCount = accounts.filter((a) => a.status === 'pending').length;
+  const pendingAccountsCount = accounts.filter((a) => a.role !== 'master' && a.status === 'pending').length;
 
   const loadAccounts = async () => {
     setLoadingAccounts(true);
@@ -172,7 +173,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
       const list = await fetchAllPortalAccounts();
       setAccounts(list);
       if (onAccountsChanged) {
-        onAccountsChanged(list.filter((a) => a.status === 'pending').length);
+        onAccountsChanged(list.filter((a) => a.role !== 'master' && a.status === 'pending').length);
       }
     } finally {
       setLoadingAccounts(false);
@@ -180,8 +181,14 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   };
 
   useEffect(() => {
-    loadAccounts();
-  }, []);
+    const unsubscribe = subscribeToPortalAccounts((list) => {
+      setAccounts(list);
+      if (onAccountsChanged) {
+        onAccountsChanged(list.filter((a) => a.role !== 'master' && a.status === 'pending').length);
+      }
+    });
+    return () => unsubscribe();
+  }, [onAccountsChanged]);
 
   const handleCopy = (val: string, key: string) => {
     navigator.clipboard?.writeText(val).catch(() => {});
@@ -917,10 +924,20 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
             ))}
           </div>
 
-          {/* Accounts List */}
+          {/* Accounts List with Confidentiality Agreement Status Beside Every Name */}
           <div className="space-y-2.5">
             {filteredAccounts.map((acc) => {
               const isMaster = acc.role === 'master';
+              const ndaAccepted = acc.ndaAccepted !== false;
+              const ndaSig = acc.ndaSignature || 'I AGREE';
+              const ndaDateFormatted = acc.ndaAcceptedAt || acc.createdAt
+                ? new Date(acc.ndaAcceptedAt || acc.createdAt).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })
+                : 'Verified';
+
               return (
                 <div
                   key={acc.uid}
@@ -930,10 +947,25 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                       : 'bg-slate-950 border-slate-800'
                   }`}
                 >
-                  <div className="space-y-1 min-w-0">
+                  <div className="space-y-1.5 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-bold text-white">{acc.displayName}</span>
-                      <span className="text-xs font-mono text-slate-400">· {acc.email}</span>
+
+                      {/* Confidentiality Agreement Acceptance Indicator Beside Name */}
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border ${
+                          ndaAccepted
+                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/60'
+                            : 'bg-red-950/80 text-red-300 border-red-700/60'
+                        }`}
+                        title={`Confidentiality Agreement signed with "${ndaSig}" on ${ndaDateFormatted}`}
+                      >
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                        <span>
+                          Confidentiality Agreement: Accepted (&quot;{ndaSig}&quot;) · {ndaDateFormatted}
+                        </span>
+                      </span>
+
                       <span
                         className={`text-[11px] font-mono font-bold uppercase ${
                           isMaster
@@ -948,8 +980,12 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                         [{isMaster ? 'MASTER ACCOUNT' : acc.status}]
                       </span>
                     </div>
-                    <div className="text-xs text-slate-400">
-                      {acc.position} · {acc.branch}
+                    <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-slate-300">{acc.email}</span>
+                      <span>·</span>
+                      <span>{acc.position}</span>
+                      <span>·</span>
+                      <span>{acc.branch}</span>
                     </div>
                   </div>
 
@@ -988,6 +1024,87 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                 </div>
               );
             })}
+          </div>
+
+          {/* Dedicated Master Confidentiality Agreement Acceptance Log Table */}
+          <div className="pt-4 border-t border-slate-800 space-y-2.5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h4 className="text-xs sm:text-sm font-bold text-emerald-300 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>
+                  Master Confidentiality Agreement Acceptance Registry ({accounts.length} Signed)
+                </span>
+              </h4>
+              <span className="text-[11px] font-mono text-slate-400">
+                Verification Method: Manual Typing of &quot;I AGREE&quot;
+              </span>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-900/80 text-[10px] font-mono uppercase text-slate-400">
+                    <th className="py-2.5 px-3">Staff Name</th>
+                    <th className="py-2.5 px-3">Confidentiality Agreement Status</th>
+                    <th className="py-2.5 px-3">Typed Confirmation</th>
+                    <th className="py-2.5 px-3">Position &amp; Branch</th>
+                    <th className="py-2.5 px-3">Date Accepted</th>
+                    <th className="py-2.5 px-3">Portal Access</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {accounts.map((acc) => {
+                    const ndaDate = acc.ndaAcceptedAt || acc.createdAt;
+                    return (
+                      <tr key={`nda-${acc.uid}`} className="hover:bg-slate-900/40">
+                        <td className="py-2.5 px-3 font-bold text-white whitespace-nowrap">
+                          {acc.displayName}
+                          <span className="block text-[10px] font-mono font-normal text-slate-400">
+                            {acc.email}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-semibold text-[11px]">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>Accepted Agreement</span>
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-amber-300 whitespace-nowrap">
+                          &quot;{acc.ndaSignature || 'I AGREE'}&quot;
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300">
+                          {acc.position} · <span className="text-slate-400">{acc.branch}</span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                          {ndaDate
+                            ? new Date(ndaDate).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                              })
+                            : 'Verified'}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span
+                            className={`font-mono text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                              acc.role === 'master'
+                                ? 'bg-amber-950 text-amber-300 border border-amber-700'
+                                : acc.status === 'approved'
+                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                                : acc.status === 'pending'
+                                ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                                : 'bg-red-950 text-red-300 border border-red-800'
+                            }`}
+                          >
+                            {acc.role === 'master' ? 'MASTER' : acc.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

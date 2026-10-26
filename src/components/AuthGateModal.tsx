@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
   Lock,
@@ -18,6 +18,7 @@ import {
   Eye,
   EyeOff,
   X,
+  FileSignature,
 } from 'lucide-react';
 import { PortalUser } from '../types/foodSafety';
 import {
@@ -73,11 +74,40 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   const [regPassword, setRegPassword] = useState('');
   const [regPosition, setRegPosition] = useState(POSITION_OPTIONS[0]);
   const [regBranch, setRegBranch] = useState(BRANCH_OPTIONS[0]);
+  const [regNdaTyping, setRegNdaTyping] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  const isNdaTypedValid = regNdaTyping.trim().toUpperCase() === 'I AGREE';
+
+  // Automatically sync pending account to Firestore/Server and poll for Master approval every 3.5s
+  useEffect(() => {
+    if (!currentUser || currentUser.role === 'master' || currentUser.status === 'approved') {
+      return;
+    }
+
+    let mounted = true;
+    const syncAndCheck = async () => {
+      try {
+        const updated = await checkCurrentAccountStatus(currentUser);
+        if (mounted && updated && updated.status !== currentUser.status) {
+          onAuthenticated(updated);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    syncAndCheck();
+    const timer = setInterval(syncAndCheck, 3500);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [currentUser, onAuthenticated]);
 
   const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,6 +137,10 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
       setError('Password must be at least 6 characters.');
       return;
     }
+    if (!isNdaTypedValid) {
+      setError('You must manually type "I AGREE" in the Confidentiality Agreement box to create an account.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -116,6 +150,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
         displayName: regName,
         position: regPosition,
         branch: regBranch,
+        ndaSignature: 'I AGREE',
       });
       onAuthenticated(user);
     } catch (err: any) {
@@ -152,7 +187,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
       onAuthenticated(updated);
       if (updated.status === 'pending') {
         setStatusMessage(
-          'Your account is still awaiting approval from the Master Account. Please contact L&D Administration.'
+          'Approval request transmitted & active in Master Account queue. Awaiting Master Admin click to approve.'
         );
       } else if (updated.status === 'rejected') {
         setStatusMessage('Your account request was declined by the Master Account.');
@@ -202,7 +237,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                 {isRejected
                   ? 'Your staff account registration was declined by the Master Account administrator. Portal access remains locked.'
-                  : 'This training hub is strictly private. Your account has been registered and is locked until the Master Account administrator approves your access.'}
+                  : 'This training hub is strictly private. Your account and signed Confidentiality Agreement have been recorded and are awaiting Master Account approval.'}
               </p>
             </div>
           </div>
@@ -224,6 +259,13 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
             <div className="flex justify-between py-1 border-b border-slate-800/80">
               <span className="text-slate-400">Assigned Branch:</span>
               <span className="text-slate-200">{currentUser.branch}</span>
+            </div>
+            <div className="flex justify-between py-1 border-b border-slate-800/80">
+              <span className="text-slate-400">Confidentiality Agreement:</span>
+              <span className="font-mono font-bold text-emerald-400 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>ACCEPTED (&quot;{currentUser.ndaSignature || 'I AGREE'}&quot;)</span>
+              </span>
             </div>
             <div className="flex justify-between py-1">
               <span className="text-slate-400">Approval Status:</span>
@@ -327,15 +369,15 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                  <FileSignature className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                   <span>
-                    <strong>New Staff Registration:</strong> Newly created accounts remain locked in <em>Pending</em> status until approved by the Master Account.
+                    <strong>Mandatory NDA Acceptance:</strong> Creating a new staff account requires manually typing <code>&quot;I AGREE&quot;</code> to accept the Company Confidentiality Agreement.
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <Lock className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                  <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                   <span>
-                    <strong>Master Account Control:</strong> Only the Master Account can approve staff registrations and publish new SOPs, Policies, Guides, and Station Checklists.
+                    <strong>Master Account Approval:</strong> Newly registered accounts remain locked in <em>Pending</em> status until reviewed and approved by the Master Account.
                   </span>
                 </li>
               </ul>
@@ -446,11 +488,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
               </form>
             ) : (
               <form onSubmit={handleRegisterSubmit} className="space-y-3">
-                <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-700/40 text-[11px] text-amber-200 leading-relaxed">
-                  <strong>Master Approval Required:</strong> Creating a new staff account submits your registration to the Master Account for verification before you can access the portal.
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="text-xs font-semibold text-slate-300 block mb-1">
                       Employee Full Name
@@ -484,7 +522,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="text-xs font-semibold text-slate-300 block mb-1">
                       Position / Station Role
@@ -542,13 +580,78 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                   </div>
                 </div>
 
+                {/* Mandatory Confidentiality & Non-Disclosure Agreement (Manual "I AGREE") */}
+                <div
+                  className={`p-3.5 rounded-2xl border space-y-2.5 transition-colors ${
+                    isNdaTypedValid
+                      ? 'bg-emerald-950/25 border-emerald-500/50'
+                      : 'bg-slate-950 border-amber-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                      <FileSignature className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Mandatory Confidentiality &amp; Non-Disclosure Agreement</span>
+                    </span>
+                    <span
+                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                        isNdaTypedValid
+                          ? 'bg-emerald-950 text-emerald-300 border-emerald-600'
+                          : 'bg-amber-950 text-amber-300 border-amber-700'
+                      }`}
+                    >
+                      {isNdaTypedValid ? '✔ "I AGREE" VERIFIED' : 'MANUAL TYPING REQUIRED'}
+                    </span>
+                  </div>
+
+                  <div className="max-h-24 overflow-y-auto pr-1 text-[11px] text-slate-300 leading-relaxed space-y-1.5 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+                    <p>
+                      <strong>1. Proprietary Company Property:</strong> All SOPs (IKQA-SOP#001–#012+), Policies (IKQAP#001–#021+), Station Checklists (JNLD-CHK-FOH-REC-001+), recipes, broth formulations, supplier lists, and training materials inside this Hub are strictly confidential trade secrets of <strong>Imperial Kitchen Group Inc. / Jiangnan Hotpot</strong>.
+                    </p>
+                    <p>
+                      <strong>2. Strict Non-Disclosure &amp; Anti-Leakage:</strong> I agree never to screenshot, record, copy, download, forward, or disclose any document, checklist, or portal credential to unauthorized individuals or external parties.
+                    </p>
+                    <p>
+                      <strong>3. Audit &amp; Master Account Logging:</strong> I understand that my acceptance of this Confidentiality Agreement is permanently logged alongside my name in the Master Account registry and enforced under company policy and RA 10173 (Data Privacy Act).
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-200 block mb-1">
+                      To accept this Confidentiality Agreement, manually type{' '}
+                      <span className="font-mono text-amber-300 bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-700">
+                        I AGREE
+                      </span>{' '}
+                      below:
+                    </label>
+                    <input
+                      type="text"
+                      value={regNdaTyping}
+                      onChange={(e) => setRegNdaTyping(e.target.value)}
+                      onPaste={(e) => e.preventDefault()}
+                      placeholder='Type "I AGREE" manually here'
+                      className={`w-full bg-slate-900 border rounded-xl px-3 py-2 text-xs font-mono font-bold tracking-wider uppercase focus:outline-none ${
+                        isNdaTypedValid
+                          ? 'border-emerald-500 text-emerald-300'
+                          : 'border-slate-700 focus:border-amber-500 text-white'
+                      }`}
+                    />
+                  </div>
+                </div>
+
                 <button
                   type="submit"
-                  disabled={loading}
-                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-colors cursor-pointer"
+                  disabled={loading || !isNdaTypedValid}
+                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-colors cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>{loading ? 'Submitting Registration...' : 'Submit Account for Master Approval'}</span>
+                  <span>
+                    {loading
+                      ? 'Submitting Registration...'
+                      : isNdaTypedValid
+                      ? 'Submit Account & Signed NDA for Master Approval'
+                      : 'Type "I AGREE" Above to Enable Account Creation'}
+                  </span>
                 </button>
               </form>
             )}

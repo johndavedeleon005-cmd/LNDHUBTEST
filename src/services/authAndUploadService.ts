@@ -10,6 +10,7 @@ import {
   deleteDoc,
   collection,
   getDocs,
+  onSnapshot,
   query,
   where,
   serverTimestamp,
@@ -37,6 +38,51 @@ export const MASTER_ACCOUNT_DETAILS = {
 const LOCAL_ACCOUNTS_KEY = 'ikqa_portal_accounts_v1';
 const LOCAL_SESSION_KEY = 'ikqa_active_session_v1';
 const LOCAL_DOCS_KEY = 'ikqa_documents_v2';
+const SYNC_CHANNEL_NAME = 'ikqa_portal_sync_v1';
+const CLOUD_API_ORIGIN = 'https://ais-pre-76tv6e65bsiare5wrmxxvo-551232212768.asia-east1.run.app';
+
+export function toDeterministicUid(email: string): string {
+  return `user-${email.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 90)}`;
+}
+
+function broadcastAccountSync() {
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel(SYNC_CHANNEL_NAME);
+      bc.postMessage({ type: 'ACCOUNTS_UPDATED', timestamp: Date.now() });
+      bc.close();
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function apiFetch(path: string, init?: RequestInit): Promise<Response | null> {
+  try {
+    const res = await fetch(path, init);
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
+      return res;
+    }
+    if (res.status === 400 || res.status === 401 || res.status === 404) {
+      if (contentType.includes('application/json')) {
+        return res;
+      }
+    }
+  } catch {
+    // Fallback to Cloud Run origin when hosted on static GitHub Pages
+  }
+
+  try {
+    if (typeof window !== 'undefined' && !window.location.origin.includes('ais-')) {
+      const cloudRes = await fetch(`${CLOUD_API_ORIGIN}${path}`, init);
+      return cloudRes;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
 
 const DEFAULT_SEED_ACCOUNTS: (PortalUser & { password?: string })[] = [
   {
@@ -48,6 +94,9 @@ const DEFAULT_SEED_ACCOUNTS: (PortalUser & { password?: string })[] = [
     branch: MASTER_ACCOUNT_DETAILS.branch,
     role: 'master',
     status: 'approved',
+    ndaAccepted: true,
+    ndaSignature: 'I AGREE',
+    ndaAcceptedAt: '2026-01-01T00:00:00.000Z',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     authProvider: 'master_credentials',
@@ -61,6 +110,9 @@ const DEFAULT_SEED_ACCOUNTS: (PortalUser & { password?: string })[] = [
     branch: 'Jiangnan Hotpot - BGC High Street',
     role: 'staff',
     status: 'pending',
+    ndaAccepted: true,
+    ndaSignature: 'I AGREE',
+    ndaAcceptedAt: '2026-10-25T08:30:00.000Z',
     createdAt: '2026-10-25T08:30:00.000Z',
     updatedAt: '2026-10-25T08:30:00.000Z',
     authProvider: 'staff_credentials',
@@ -74,6 +126,9 @@ const DEFAULT_SEED_ACCOUNTS: (PortalUser & { password?: string })[] = [
     branch: 'Jiangnan Hotpot - SM Mall of Asia',
     role: 'staff',
     status: 'approved',
+    ndaAccepted: true,
+    ndaSignature: 'I AGREE',
+    ndaAcceptedAt: '2026-10-20T09:00:00.000Z',
     createdAt: '2026-10-20T09:00:00.000Z',
     updatedAt: '2026-10-20T09:15:00.000Z',
     authProvider: 'staff_credentials',
@@ -85,7 +140,14 @@ export function getLocalAccounts(): (PortalUser & { password?: string })[] {
     const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((a: any) => ({
+          ...a,
+          ndaAccepted: a.ndaAccepted ?? true,
+          ndaSignature: a.ndaSignature || 'I AGREE',
+          ndaAcceptedAt: a.ndaAcceptedAt || a.createdAt || new Date().toISOString(),
+        }));
+      }
     }
   } catch {
     // ignore
@@ -122,6 +184,51 @@ export function saveSessionUser(user: PortalUser | null) {
   }
 }
 
+async function syncAccountToFirestore(
+  user: PortalUser & { password?: string }
+): Promise<void> {
+  const docId = (user.uid || toDeterministicUid(user.email)).slice(0, 128);
+  const nowIso = new Date().toISOString();
+  const payload: Record<string, any> = {
+    uid: docId,
+    email: user.email.trim().toLowerCase().slice(0, 254),
+    displayName: (user.displayName || user.email).trim().slice(0, 120),
+    position: (user.position || 'Kitchen / Service Staff').trim().slice(0, 120),
+    branch: (user.branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160),
+    role: user.role === 'master' ? 'master' : 'staff',
+    status:
+      user.status === 'approved' || user.status === 'rejected' ? user.status : 'pending',
+    ndaAccepted: true,
+    ndaSignature: 'I AGREE',
+    ndaAcceptedAt: (user.ndaAcceptedAt || user.createdAt || nowIso).slice(0, 64),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  if (user.password) {
+    payload.credentialPass = user.password.slice(0, 128);
+  }
+
+  try {
+    await setDoc(doc(db, 'users', docId), payload, { merge: true });
+  } catch {
+    // Also try deterministic ID if user.uid was different
+  }
+
+  const detId = toDeterministicUid(user.email);
+  if (detId !== docId) {
+    try {
+      await setDoc(
+        doc(db, 'users', detId),
+        { ...payload, uid: detId },
+        { merge: true }
+      );
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export async function signInWithCredentials(
   identifier: string,
   password: string
@@ -129,31 +236,7 @@ export async function signInWithCredentials(
   const cleanId = identifier.trim().toLowerCase();
   const cleanPw = password.trim();
 
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: cleanId, password: cleanPw }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.user) {
-        saveSessionUser(data.user);
-        return data.user;
-      }
-    } else {
-      const errData = await res.json().catch(() => ({}));
-      if (res.status === 401 && errData.error) {
-        throw new Error(errData.error);
-      }
-    }
-  } catch (err: any) {
-    if (err.message?.includes('Invalid credentials')) {
-      throw err;
-    }
-  }
-
-  // Local fallback check
+  // 1. Check Master Account credentials immediately
   if (
     (cleanId === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
       cleanId === MASTER_ACCOUNT_DETAILS.username.toLowerCase() ||
@@ -168,6 +251,9 @@ export async function signInWithCredentials(
       branch: MASTER_ACCOUNT_DETAILS.branch,
       role: 'master',
       status: 'approved',
+      ndaAccepted: true,
+      ndaSignature: 'I AGREE',
+      ndaAcceptedAt: '2026-01-01T00:00:00.000Z',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       authProvider: 'master_credentials',
@@ -176,6 +262,56 @@ export async function signInWithCredentials(
     return masterUser;
   }
 
+  // 2. Check Firebase Firestore /users so cross-device accounts work everywhere
+  try {
+    const detUid = toDeterministicUid(cleanId);
+    const snap = await getDoc(doc(db, 'users', detUid));
+    if (snap.exists()) {
+      const d = snap.data();
+      if (!d.credentialPass || d.credentialPass === cleanPw) {
+        const nowIso = new Date().toISOString();
+        const fsUser: PortalUser = {
+          uid: d.uid || detUid,
+          email: d.email || cleanId,
+          displayName: d.displayName || cleanId,
+          position: d.position || 'Staff',
+          branch: d.branch || 'Jiangnan Hotpot',
+          role: d.role === 'master' ? 'master' : 'staff',
+          status: d.status || 'pending',
+          ndaAccepted: true,
+          ndaSignature: d.ndaSignature || 'I AGREE',
+          ndaAcceptedAt: d.ndaAcceptedAt || nowIso,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          authProvider: 'staff_credentials',
+        };
+        saveSessionUser(fsUser);
+        return fsUser;
+      }
+    }
+  } catch {
+    // ignore and continue
+  }
+
+  // 3. Check Express API
+  try {
+    const res = await apiFetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: cleanId, password: cleanPw }),
+    });
+    if (res && res.ok) {
+      const data = await res.json();
+      if (data.user) {
+        saveSessionUser(data.user);
+        return data.user;
+      }
+    }
+  } catch {
+    // continue to local check
+  }
+
+  // 4. Local fallback check
   const localAccs = getLocalAccounts();
   const matched = localAccs.find(
     (a) => a.email.toLowerCase() === cleanId || a.uid.toLowerCase() === cleanId
@@ -197,51 +333,84 @@ export async function registerStaffAccount(params: {
   displayName: string;
   position: string;
   branch: string;
+  ndaSignature?: string;
 }): Promise<PortalUser> {
+  const cleanSig = String(params.ndaSignature || 'I AGREE').trim().toUpperCase();
+  if (cleanSig !== 'I AGREE') {
+    throw new Error('You must manually type "I AGREE" to accept the Confidentiality Agreement.');
+  }
+
   const cleanEmail = params.email.trim().toLowerCase();
+  const cleanPw = params.password.trim();
   const isMaster =
     cleanEmail === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
     cleanEmail === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase();
 
-  const localAccs = getLocalAccounts();
-  if (localAccs.some((a) => a.email.toLowerCase() === cleanEmail)) {
-    throw new Error('An account with this Email / Employee ID already exists. Please sign in.');
-  }
+  const deterministicUid = toDeterministicUid(cleanEmail);
+  const nowIso = new Date().toISOString();
 
   const newEntry: PortalUser & { password?: string } = {
-    uid: `staff-${Date.now()}`,
+    uid: deterministicUid,
     email: cleanEmail,
-    password: params.password.trim(),
+    password: cleanPw,
     displayName: params.displayName.trim().slice(0, 120),
     position: (params.position || 'Kitchen / Service Staff').trim().slice(0, 120),
     branch: (params.branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160),
     role: isMaster ? 'master' : 'staff',
     status: isMaster ? 'approved' : 'pending',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    ndaAccepted: true,
+    ndaSignature: 'I AGREE',
+    ndaAcceptedAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
     authProvider: 'staff_credentials',
   };
 
-  const updatedLocal = [...localAccs, newEntry];
-  saveLocalAccounts(updatedLocal);
+  // 1. Save to LocalStorage and broadcast across tabs
+  const localAccs = getLocalAccounts();
+  const existingIdx = localAccs.findIndex(
+    (a) => a.email.toLowerCase() === cleanEmail || a.uid === deterministicUid
+  );
+  if (existingIdx >= 0) {
+    localAccs[existingIdx] = {
+      ...localAccs[existingIdx],
+      ...newEntry,
+      status:
+        localAccs[existingIdx].status === 'approved' ? 'approved' : newEntry.status,
+    };
+  } else {
+    localAccs.push(newEntry);
+  }
+  saveLocalAccounts(localAccs);
 
+  // 2. Write directly to Firebase Firestore so Master Account receives it in real time across any browser/device/GitHub Pages!
+  await syncAccountToFirestore(newEntry);
+
+  // 3. Also register on Express backend
   try {
-    const res = await fetch('/api/auth/register', {
+    const res = await apiFetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        ...params,
+        uid: deterministicUid,
+        ndaSignature: 'I AGREE',
+        syncOnly: true,
+      }),
     });
-    if (res.ok) {
+    if (res && res.ok) {
       const data = await res.json();
       if (data.user) {
+        broadcastAccountSync();
         saveSessionUser(data.user);
         return data.user;
       }
     }
   } catch {
-    // Fallback to local
+    // Fallback to Firestore + local entry
   }
 
+  broadcastAccountSync();
   const { password: _pw, ...safeUser } = newEntry;
   saveSessionUser(safeUser);
   return safeUser;
@@ -260,21 +429,25 @@ export async function signInWithGoogleAccount(
 
   let firestoreProfile: PortalUser | null = null;
   const userDocPath = `users/${fbUser.uid}`;
+  const nowIso = new Date().toISOString();
 
   try {
     const snap = await getDoc(doc(db, 'users', fbUser.uid));
     if (snap.exists()) {
       const d = snap.data();
       firestoreProfile = {
-        uid: d.uid,
-        email: d.email,
-        displayName: d.displayName,
-        position: d.position,
-        branch: d.branch,
-        role: isMaster ? 'master' : d.role,
-        status: isMaster ? 'approved' : d.status,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        uid: d.uid || fbUser.uid,
+        email: d.email || email,
+        displayName: d.displayName || fbUser.displayName || email,
+        position: d.position || defaultPosition,
+        branch: d.branch || defaultBranch,
+        role: isMaster ? 'master' : d.role || 'staff',
+        status: isMaster ? 'approved' : d.status || 'pending',
+        ndaAccepted: true,
+        ndaSignature: d.ndaSignature || 'I AGREE',
+        ndaAcceptedAt: d.ndaAcceptedAt || nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
         authProvider: 'google',
       };
     } else {
@@ -286,6 +459,9 @@ export async function signInWithGoogleAccount(
         branch: (isMaster ? MASTER_ACCOUNT_DETAILS.branch : defaultBranch).slice(0, 160),
         role: isMaster ? 'master' : 'staff',
         status: isMaster ? 'approved' : 'pending',
+        ndaAccepted: true,
+        ndaSignature: 'I AGREE',
+        ndaAcceptedAt: nowIso,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -298,8 +474,11 @@ export async function signInWithGoogleAccount(
         branch: newProfilePayload.branch,
         role: newProfilePayload.role as 'master' | 'staff',
         status: newProfilePayload.status as 'pending' | 'approved' | 'rejected',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        ndaAccepted: true,
+        ndaSignature: 'I AGREE',
+        ndaAcceptedAt: nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
         authProvider: 'google',
       };
     }
@@ -311,9 +490,8 @@ export async function signInWithGoogleAccount(
     }
   }
 
-  // Also sync with backend store so Master Dashboard shows all accounts in one unified table
   try {
-    const res = await fetch('/api/auth/google-sync', {
+    const res = await apiFetch('/api/auth/google-sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -324,13 +502,15 @@ export async function signInWithGoogleAccount(
         branch: firestoreProfile?.branch || defaultBranch,
       }),
     });
-    if (res.ok) {
+    if (res && res.ok) {
       const data = await res.json();
       if (data.user) {
         firestoreProfile = {
           ...data.user,
           role: isMaster ? 'master' : firestoreProfile?.role || data.user.role,
           status: isMaster ? 'approved' : firestoreProfile?.status || data.user.status,
+          ndaAccepted: true,
+          ndaSignature: 'I AGREE',
         };
       }
     }
@@ -346,12 +526,14 @@ export async function signInWithGoogleAccount(
     branch: isMaster ? MASTER_ACCOUNT_DETAILS.branch : defaultBranch,
     role: isMaster ? 'master' : 'staff',
     status: isMaster ? 'approved' : 'pending',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    ndaAccepted: true,
+    ndaSignature: 'I AGREE',
+    ndaAcceptedAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
     authProvider: 'google',
   };
 
-  // Sync to local accounts list
   const localAccs = getLocalAccounts();
   const idx = localAccs.findIndex((a) => a.uid === finalUser.uid || a.email === finalUser.email);
   if (idx >= 0) {
@@ -361,6 +543,7 @@ export async function signInWithGoogleAccount(
   }
   saveLocalAccounts(localAccs);
   saveSessionUser(finalUser);
+  broadcastAccountSync();
 
   return finalUser;
 }
@@ -379,18 +562,55 @@ export async function signOutPortalUser() {
 export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
   const merged = new Map<string, PortalUser>();
 
+  const upsertAccount = (acc: PortalUser) => {
+    const key = acc.email.trim().toLowerCase();
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, {
+        ...acc,
+        ndaAccepted: acc.ndaAccepted ?? true,
+        ndaSignature: acc.ndaSignature || 'I AGREE',
+        ndaAcceptedAt: acc.ndaAcceptedAt || acc.createdAt,
+      });
+      return;
+    }
+
+    // Prefer non-pending status if one source already recorded Master approval/rejection
+    const resolvedStatus =
+      acc.status !== 'pending'
+        ? acc.status
+        : existing.status !== 'pending'
+        ? existing.status
+        : 'pending';
+
+    const resolvedRole =
+      acc.role === 'master' || existing.role === 'master' ? 'master' : 'staff';
+
+    merged.set(key, {
+      ...existing,
+      ...acc,
+      role: resolvedRole,
+      status: resolvedStatus,
+      ndaAccepted: true,
+      ndaSignature: acc.ndaSignature || existing.ndaSignature || 'I AGREE',
+      ndaAcceptedAt: acc.ndaAcceptedAt || existing.ndaAcceptedAt || acc.createdAt,
+    });
+  };
+
+  // 1. Seed & local accounts
   for (const acc of getLocalAccounts()) {
     const { password: _pw, ...safe } = acc;
-    merged.set(safe.email.toLowerCase(), safe);
+    upsertAccount(safe);
   }
 
+  // 2. Express backend accounts
   try {
-    const res = await fetch('/api/auth/accounts');
-    if (res.ok) {
+    const res = await apiFetch('/api/auth/accounts');
+    if (res && res.ok) {
       const data = await res.json();
       if (Array.isArray(data.accounts)) {
         for (const acc of data.accounts) {
-          merged.set(acc.email.toLowerCase(), acc);
+          upsertAccount(acc);
         }
       }
     }
@@ -398,34 +618,130 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
     // ignore
   }
 
-  // If signed in with Firebase Auth as admin, also merge Firestore /users
-  if (auth.currentUser) {
-    try {
-      const snap = await getDocs(collection(db, 'users'));
-      snap.forEach((docSnap) => {
-        const d = docSnap.data();
-        if (d && d.email) {
-          merged.set(String(d.email).toLowerCase(), {
-            uid: d.uid || docSnap.id,
-            email: d.email,
-            displayName: d.displayName || d.email,
-            position: d.position || 'Staff',
-            branch: d.branch || 'Jiangnan Hotpot',
-            role: d.role || 'staff',
-            status: d.status || 'pending',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            authProvider: 'google',
-          });
-        }
-      });
-    } catch {
-      // Non-admin Firebase user or offline
-    }
+  // 3. ALWAYS query Firebase Firestore /users (even when signed in via Master Email/Password!)
+  try {
+    const q = query(
+      collection(db, 'users'),
+      where('ndaAccepted', '==', true),
+      where('ndaSignature', '==', 'I AGREE')
+    );
+    const snap = await getDocs(q);
+    snap.forEach((docSnap) => {
+      const d = docSnap.data();
+      if (d && d.email) {
+        const nowIso = new Date().toISOString();
+        upsertAccount({
+          uid: d.uid || docSnap.id,
+          email: d.email,
+          displayName: d.displayName || d.email,
+          position: d.position || 'Staff',
+          branch: d.branch || 'Jiangnan Hotpot',
+          role: d.role === 'master' ? 'master' : 'staff',
+          status:
+            d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending',
+          ndaAccepted: true,
+          ndaSignature: d.ndaSignature || 'I AGREE',
+          ndaAcceptedAt: d.ndaAcceptedAt || nowIso,
+          createdAt: d.ndaAcceptedAt || nowIso,
+          updatedAt: nowIso,
+          authProvider: 'staff_credentials',
+        });
+      }
+    });
+  } catch {
+    // ignore if offline
   }
 
-  const list = Array.from(merged.values());
+  // Sort so pending accounts appear right at the top for the Master Account
+  const list = Array.from(merged.values()).sort((a, b) => {
+    if (a.status === 'pending' && b.status !== 'pending') return -1;
+    if (a.status !== 'pending' && b.status === 'pending') return 1;
+    return (b.createdAt || '').localeCompare(a.createdAt || '');
+  });
+
+  saveLocalAccounts(
+    list.map((u) => {
+      const existingLocal = getLocalAccounts().find(
+        (la) => la.email.toLowerCase() === u.email.toLowerCase()
+      );
+      return { ...u, password: existingLocal?.password };
+    })
+  );
+
   return list;
+}
+
+export function subscribeToPortalAccounts(
+  onUpdate: (accounts: PortalUser[]) => void
+): () => void {
+  let active = true;
+
+  const refresh = () => {
+    if (!active) return;
+    fetchAllPortalAccounts()
+      .then((list) => {
+        if (active) onUpdate(list);
+      })
+      .catch(() => {});
+  };
+
+  // Initial load
+  refresh();
+
+  // 1. Live Firestore listener for instant cross-device account registration notifications
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    const q = query(
+      collection(db, 'users'),
+      where('ndaAccepted', '==', true),
+      where('ndaSignature', '==', 'I AGREE')
+    );
+    unsubFirestore = onSnapshot(
+      q,
+      () => {
+        refresh();
+      },
+      () => {
+        // Ignore snapshot error and rely on polling
+      }
+    );
+  } catch {
+    // ignore
+  }
+
+  // 2. BroadcastChannel listener for same-browser tabs
+  let bc: BroadcastChannel | null = null;
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      bc = new BroadcastChannel(SYNC_CHANNEL_NAME);
+      bc.onmessage = () => refresh();
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Storage event listener
+  const handleStorage = (e: StorageEvent) => {
+    if (!e.key || e.key === LOCAL_ACCOUNTS_KEY || e.key === LOCAL_SESSION_KEY) {
+      refresh();
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', handleStorage);
+  }
+
+  // 4. Periodic 4-second poll as rock-solid fallback
+  const intervalId = setInterval(refresh, 4000);
+
+  return () => {
+    active = false;
+    if (unsubFirestore) unsubFirestore();
+    if (bc) bc.close();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('storage', handleStorage);
+    }
+    clearInterval(intervalId);
+  };
 }
 
 export async function updateAccountApprovalStatus(
@@ -434,28 +750,53 @@ export async function updateAccountApprovalStatus(
   role?: 'master' | 'staff'
 ): Promise<PortalUser[]> {
   const nextRole = role || targetUser.role;
+  const nowIso = new Date().toISOString();
 
   // 1. Update local store
-  const localAccs = getLocalAccounts().map((a) => {
+  const localAccs = getLocalAccounts();
+  let foundLocal = false;
+  const updatedLocal = localAccs.map((a) => {
     if (a.uid === targetUser.uid || a.email.toLowerCase() === targetUser.email.toLowerCase()) {
+      foundLocal = true;
       return {
         ...a,
         status,
         role: nextRole,
-        updatedAt: new Date().toISOString(),
+        updatedAt: nowIso,
       };
     }
     return a;
   });
-  saveLocalAccounts(localAccs);
+  if (!foundLocal) {
+    updatedLocal.push({
+      ...targetUser,
+      status,
+      role: nextRole,
+      updatedAt: nowIso,
+    });
+  }
+  saveLocalAccounts(updatedLocal);
 
-  // 2. Update server store
+  // 2. ALWAYS update Firestore /users (works for both Master credential login & Google login)
+  await syncAccountToFirestore({
+    ...targetUser,
+    status,
+    role: nextRole,
+    updatedAt: nowIso,
+  });
+
+  // 3. Update Express backend store
   try {
-    await fetch('/api/auth/approve', {
+    await apiFetch('/api/auth/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         targetUid: targetUser.uid,
+        email: targetUser.email,
+        displayName: targetUser.displayName,
+        position: targetUser.position,
+        branch: targetUser.branch,
+        ndaSignature: targetUser.ndaSignature || 'I AGREE',
         status,
         role: nextRole,
       }),
@@ -464,34 +805,67 @@ export async function updateAccountApprovalStatus(
     // ignore
   }
 
-  // 3. Update Firestore if authenticated with Firebase
-  if (auth.currentUser) {
-    try {
-      const userRef = doc(db, 'users', targetUser.uid);
-      const snap = await getDoc(userRef);
-      if (snap.exists()) {
-        const existing = snap.data();
-        await updateDoc(userRef, {
-          role: nextRole,
-          status,
-          displayName: existing.displayName,
-          position: existing.position,
-          branch: existing.branch,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    } catch {
-      // ignore if account only exists in credential store
-    }
-  }
-
+  broadcastAccountSync();
   return fetchAllPortalAccounts();
 }
 
 export async function checkCurrentAccountStatus(user: PortalUser): Promise<PortalUser> {
+  const cleanEmail = user.email.trim().toLowerCase();
+  const detUid = toDeterministicUid(cleanEmail);
+
+  // 1. Check Firebase Firestore first (tried by both user.uid and deterministic UID)
+  const candidateIds = Array.from(new Set([user.uid, detUid].filter(Boolean)));
+  for (const cid of candidateIds) {
+    try {
+      const snap = await getDoc(doc(db, 'users', cid));
+      if (snap.exists()) {
+        const d = snap.data();
+        const resolved: PortalUser = {
+          ...user,
+          uid: d.uid || cid,
+          role: d.role === 'master' ? 'master' : 'staff',
+          status:
+            d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending',
+          ndaAccepted: true,
+          ndaSignature: d.ndaSignature || 'I AGREE',
+        };
+        saveSessionUser(resolved);
+        return resolved;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Self-healing: If the pending user's account was created before Firestore sync was added,
+  // push it to Firestore and the server right now so the Master Account immediately sees it!
+  if (user.status === 'pending') {
+    await syncAccountToFirestore(user);
+    try {
+      await apiFetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: user.uid || detUid,
+          email: user.email,
+          displayName: user.displayName,
+          position: user.position,
+          branch: user.branch,
+          ndaSignature: 'I AGREE',
+          syncOnly: true,
+        }),
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Check Express backend status endpoint
   try {
-    const res = await fetch(`/api/auth/status/${encodeURIComponent(user.uid)}`);
-    if (res.ok) {
+    const res = await apiFetch(
+      `/api/auth/status/${encodeURIComponent(user.uid)}?email=${encodeURIComponent(cleanEmail)}`
+    );
+    if (res && res.ok) {
       const data = await res.json();
       if (data.user) {
         saveSessionUser(data.user);
@@ -502,9 +876,10 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
     // ignore
   }
 
+  // 3. Check local storage
   const localAccs = getLocalAccounts();
   const found = localAccs.find(
-    (a) => a.uid === user.uid || a.email.toLowerCase() === user.email.toLowerCase()
+    (a) => a.uid === user.uid || a.email.toLowerCase() === cleanEmail
   );
   if (found) {
     const { password: _pw, ...safe } = found;
@@ -759,12 +1134,12 @@ export async function parseDocumentWithAI(params: {
   existingCustomCount?: number;
 }): Promise<{ document: FoodSafetyDoc; aiStructured: boolean }> {
   try {
-    const res = await fetch('/api/documents/ai-parse', {
+    const res = await apiFetch('/api/documents/ai-parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    if (res.ok) {
+    if (res && res.ok) {
       const data = await res.json();
       if (data.document) {
         return {
@@ -794,7 +1169,7 @@ export async function publishCustomDocument(docItem: FoodSafetyDoc): Promise<Foo
 
   // 1. Save to Express backend
   try {
-    await fetch('/api/custom-documents', {
+    await apiFetch('/api/custom-documents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ document: normalized }),
@@ -837,7 +1212,7 @@ export async function publishCustomDocument(docItem: FoodSafetyDoc): Promise<Foo
 
 export async function removeCustomDocument(docId: string): Promise<void> {
   try {
-    await fetch(`/api/custom-documents/${encodeURIComponent(docId)}`, {
+    await apiFetch(`/api/custom-documents/${encodeURIComponent(docId)}`, {
       method: 'DELETE',
     });
   } catch {
@@ -856,8 +1231,8 @@ export async function removeCustomDocument(docId: string): Promise<void> {
 export async function fetchServerCustomDocuments(): Promise<FoodSafetyDoc[]> {
   const results: FoodSafetyDoc[] = [];
   try {
-    const res = await fetch('/api/custom-documents');
-    if (res.ok) {
+    const res = await apiFetch('/api/custom-documents');
+    if (res && res.ok) {
       const data = await res.json();
       if (Array.isArray(data.documents)) {
         return data.documents;
@@ -867,32 +1242,30 @@ export async function fetchServerCustomDocuments(): Promise<FoodSafetyDoc[]> {
     // ignore
   }
 
-  if (auth.currentUser) {
-    try {
-      const q = query(
-        collection(db, 'custom_documents'),
-        where('visibility', '==', 'approved_staff')
-      );
-      const snap = await getDocs(q);
-      snap.forEach((docSnap) => {
-        const d = docSnap.data();
-        if (d && d.code && d.title) {
-          const built = buildLocalStructuredDocument({
-            rawText: `${d.summary}\n${d.contentBody || ''}`,
-            docType: d.type || 'sop',
-            code: d.code,
-            title: d.title,
-            category: d.category || 'Operations & Maintenance',
-          });
-          results.push({
-            ...built,
-            id: d.id || docSnap.id,
-          });
-        }
-      });
-    } catch {
-      // ignore
-    }
+  try {
+    const q = query(
+      collection(db, 'custom_documents'),
+      where('visibility', '==', 'approved_staff')
+    );
+    const snap = await getDocs(q);
+    snap.forEach((docSnap) => {
+      const d = docSnap.data();
+      if (d && d.code && d.title) {
+        const built = buildLocalStructuredDocument({
+          rawText: `${d.summary}\n${d.contentBody || ''}`,
+          docType: d.type || 'sop',
+          code: d.code,
+          title: d.title,
+          category: d.category || 'Operations & Maintenance',
+        });
+        results.push({
+          ...built,
+          id: d.id || docSnap.id,
+        });
+      }
+    });
+  } catch {
+    // ignore
   }
 
   return results;

@@ -67,6 +67,28 @@
           "enum": ["pending", "approved", "rejected"],
           "description": "Master account approval state."
         },
+        "ndaAccepted": {
+          "type": "boolean",
+          "description": "Whether the user manually typed I AGREE to accept the Confidentiality Agreement."
+        },
+        "ndaSignature": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Manual agreement confirmation string ('I AGREE')."
+        },
+        "ndaAcceptedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "ISO timestamp when the user manually typed I AGREE."
+        },
+        "credentialPass": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Portal account credential key for cross-device staff sign-in."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -86,6 +108,10 @@
         "branch",
         "role",
         "status",
+        "ndaAccepted",
+        "ndaSignature",
+        "ndaAcceptedAt",
+        "credentialPass",
         "createdAt",
         "updatedAt"
       ]

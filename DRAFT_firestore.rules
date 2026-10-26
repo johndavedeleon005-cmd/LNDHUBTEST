@@ -36,12 +36,6 @@ service cloud.firestore {
       );
     }
 
-    function isApprovedStaff() {
-      return isSignedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved';
-    }
-
     // 3. Entity Validation Blueprints
     function isValidAdminRecord(data) {
       return data.keys().hasAll(['uid', 'grantedAt']) &&
@@ -59,6 +53,10 @@ service cloud.firestore {
           'branch',
           'role',
           'status',
+          'ndaAccepted',
+          'ndaSignature',
+          'ndaAcceptedAt',
+          'credentialPass',
           'createdAt',
           'updatedAt'
         ]) &&
@@ -70,6 +68,10 @@ service cloud.firestore {
           'branch',
           'role',
           'status',
+          'ndaAccepted',
+          'ndaSignature',
+          'ndaAcceptedAt',
+          'credentialPass',
           'createdAt',
           'updatedAt'
         ]) &&
@@ -80,6 +82,10 @@ service cloud.firestore {
         data.branch is string && data.branch.size() >= 1 && data.branch.size() <= 160 &&
         (data.role == 'master' || data.role == 'staff') &&
         (data.status == 'pending' || data.status == 'approved' || data.status == 'rejected') &&
+        data.ndaAccepted is bool && data.ndaAccepted == true &&
+        data.ndaSignature is string && data.ndaSignature == 'I AGREE' &&
+        data.ndaAcceptedAt is string && data.ndaAcceptedAt.size() >= 1 && data.ndaAcceptedAt.size() <= 64 &&
+        data.credentialPass is string && data.credentialPass.size() >= 1 && data.credentialPass.size() <= 128 &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -144,15 +150,12 @@ service cloud.firestore {
 
     // 5. Collection Rules: /users/{userId}
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow get: if isValidId(userId) && resource.data.ndaAccepted == true;
+      allow list: if resource.data.ndaAccepted == true && resource.data.ndaSignature == 'I AGREE';
 
-      allow create: if isVerifiedUser() &&
-        isValidId(userId) &&
+      allow create: if isValidId(userId) &&
         isValidUserProfile(incoming()) &&
-        incoming().uid == request.auth.uid &&
-        request.auth.uid == userId &&
-        incoming().email == request.auth.token.email &&
+        incoming().uid == userId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         (
@@ -161,60 +164,40 @@ service cloud.firestore {
         );
 
       allow update: if isValidUserProfile(incoming()) &&
-        isVerifiedUser() &&
         isValidId(userId) &&
         incoming().uid == existing().uid &&
         incoming().email == existing().email &&
+        incoming().ndaAccepted == existing().ndaAccepted &&
+        incoming().ndaSignature == existing().ndaSignature &&
+        incoming().ndaAcceptedAt == existing().ndaAcceptedAt &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        (
-          // Action 1: Owner updates own profile metadata without changing role or approval status
-          (
-            request.auth.uid == userId &&
-            incoming().role == existing().role &&
-            incoming().status == existing().status &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'position', 'branch', 'updatedAt'])
-          ) ||
-          // Action 2: Master Admin approves/rejects account or updates role/profile
-          (
-            isAdmin() &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'displayName', 'position', 'branch', 'updatedAt'])
-          )
-        );
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'role',
+          'status',
+          'displayName',
+          'position',
+          'branch',
+          'credentialPass',
+          'updatedAt'
+        ]);
 
-      allow delete: if isVerifiedUser() && isValidId(userId) && isAdmin();
+      allow delete: if isValidId(userId) && isAdmin();
     }
 
     // 6. Collection Rules: /custom_documents/{docId}
     match /custom_documents/{docId} {
-      allow get: if isSignedIn() &&
-        isValidId(docId) &&
-        (
-          resource.data.authorId == request.auth.uid ||
-          isAdmin() ||
-          (resource.data.visibility == 'approved_staff' && isApprovedStaff())
-        );
+      allow get: if isValidId(docId) && resource.data.visibility == 'approved_staff';
+      allow list: if resource.data.visibility == 'approved_staff';
 
-      allow list: if isSignedIn() &&
-        (
-          resource.data.authorId == request.auth.uid ||
-          isAdmin() ||
-          (resource.data.visibility == 'approved_staff' && isApprovedStaff())
-        );
-
-      allow create: if isVerifiedUser() &&
-        isValidId(docId) &&
+      allow create: if isValidId(docId) &&
         isValidCustomDocument(incoming()) &&
-        isAdmin() &&
         incoming().id == docId &&
-        incoming().authorId == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
 
       allow update: if isValidCustomDocument(incoming()) &&
-        isVerifiedUser() &&
         isValidId(docId) &&
-        isAdmin() &&
         incoming().id == existing().id &&
         incoming().authorId == existing().authorId &&
         incoming().createdAt == existing().createdAt &&
@@ -233,7 +216,7 @@ service cloud.firestore {
           'updatedAt'
         ]);
 
-      allow delete: if isVerifiedUser() && isValidId(docId) && isAdmin();
+      allow delete: if isValidId(docId);
     }
   }
 }

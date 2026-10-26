@@ -125,6 +125,9 @@ export interface PortalUser {
   branch: string;
   role: AccountRole;
   status: AccountStatus;
+  ndaAccepted?: boolean;
+  ndaSignature?: string;
+  ndaAcceptedAt?: string;
   createdAt: string;
   updatedAt: string;
   authProvider?: 'master_credentials' | 'staff_credentials' | 'google';
