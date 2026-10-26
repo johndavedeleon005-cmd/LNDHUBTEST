@@ -385,20 +385,27 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   // VIEW 2: PRIVATE SIGN IN / CREATE STAFF ACCOUNT GATE (WITH ABOUT L&D TEAM)
   // =========================================================================
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-3 sm:p-5 select-none">
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch relative">
+    <div
+      className={`${
+        onClose
+          ? 'fixed inset-0 z-50 overflow-y-auto bg-slate-950/95 backdrop-blur-md'
+          : 'min-h-screen bg-slate-950'
+      } text-slate-100 flex items-start lg:items-center justify-center p-3 sm:p-5 select-none`}
+    >
+      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch relative my-auto">
         {onClose && (
           <button
             onClick={onClose}
-            className="absolute top-3 right-3 z-20 p-2 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+            className="absolute top-3 right-3 z-20 px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1 cursor-pointer shadow-lg"
             title="Close"
           >
-            <X className="w-4 h-4" />
+            <X className="w-3.5 h-3.5" />
+            <span>Close</span>
           </button>
         )}
 
-        {/* Left Column: Private Corporate Security Banner + About the L&D Team */}
-        <div className="lg:col-span-5 bg-gradient-to-br from-red-950/90 via-slate-900 to-slate-950 border border-red-800/40 rounded-3xl p-5 sm:p-6 flex flex-col justify-between space-y-4 shadow-2xl">
+        {/* Left Column: Private Corporate Security Banner + About the L&D Team (Order 2 on mobile/tablet so Sign In is always at the very top, Order 1 on desktop) */}
+        <div className="order-2 lg:order-1 lg:col-span-5 bg-gradient-to-br from-red-950/90 via-slate-900 to-slate-950 border border-red-800/40 rounded-3xl p-5 sm:p-6 flex flex-col justify-between space-y-4 shadow-2xl">
           <div className="space-y-3.5">
             {/* Top Brand & Animated L&D Logo Row */}
             <div className="flex items-center justify-between gap-3">
@@ -572,9 +579,46 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Sign In / Create Staff Account Form */}
-        <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl space-y-4">
+        {/* Right Column: Sign In / Create Staff Account Form (Order 1 on mobile/tablet so Sign In is ALWAYS at the top) */}
+        <div className="order-1 lg:order-2 lg:col-span-7 bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl space-y-4">
           <div className="space-y-4">
+            {/* Compact Header inside Sign In Card so Title + Sign In Status are always visible at the very top */}
+            <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl overflow-hidden bg-black ring-1 ring-red-500/60 shrink-0">
+                  <img
+                    src="./assets/aistudio/JN_HOTPOT_LOGO_d76d212e.webp"
+                    alt="Jiangnan Hotpot Logo"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+                    Imperial Kitchen Group Inc. • Private Portal
+                  </span>
+                  <h2 className="text-sm sm:text-base font-black text-white">
+                    Staff &amp; Master Account Sign In
+                  </h2>
+                </div>
+              </div>
+
+              {currentUser && (
+                <div className="flex items-center gap-1.5">
+                  <span className="hidden sm:inline text-[10px] font-mono text-emerald-400 bg-emerald-950/70 px-2 py-1 rounded-lg border border-emerald-700/50">
+                    Signed in: {currentUser.displayName}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    className="px-2.5 py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 text-red-200 border border-red-800/60 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Mode Switcher Tabs + About L&D Team Button */}
             <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800">
               <button

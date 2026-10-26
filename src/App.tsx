@@ -1141,6 +1141,11 @@ export default function App() {
           }}
           hasAgreedNDA={hasAgreedNDA}
           onAgreeNDA={handleAgreeNDA}
+          onSwitchAccount={() => {
+            setIsWelcomeOpen(false);
+            setIsAuthModalOpen(true);
+          }}
+          onSignOut={handleSignOut}
         />
 
         {/* Account Switch / Re-Auth Modal when opened from header */}

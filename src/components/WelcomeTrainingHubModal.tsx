@@ -14,6 +14,8 @@ import {
   X,
   AlertTriangle,
   FileCheck,
+  LogIn,
+  LogOut,
 } from 'lucide-react';
 
 interface WelcomeTrainingHubModalProps {
@@ -21,6 +23,8 @@ interface WelcomeTrainingHubModalProps {
   onClose: () => void;
   hasAgreedNDA: boolean;
   onAgreeNDA: () => void;
+  onSwitchAccount?: () => void;
+  onSignOut?: () => void;
 }
 
 export const WelcomeTrainingHubModal: React.FC<WelcomeTrainingHubModalProps> = ({
@@ -28,6 +32,8 @@ export const WelcomeTrainingHubModal: React.FC<WelcomeTrainingHubModalProps> = (
   onClose,
   hasAgreedNDA,
   onAgreeNDA,
+  onSwitchAccount,
+  onSignOut,
 }) => {
   const [agreed, setAgreed] = useState(hasAgreedNDA);
   const [attemptedSubmitWithoutAgreement, setAttemptedSubmitWithoutAgreement] = useState(false);
@@ -85,16 +91,28 @@ export const WelcomeTrainingHubModal: React.FC<WelcomeTrainingHubModalProps> = (
           {/* Subtle background glow */}
           <div className="absolute top-0 right-0 w-64 h-32 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
-          {/* Close button ONLY if NDA was already signed */}
-          {hasAgreedNDA && (
-            <button
-              onClick={onClose}
-              className="absolute top-4 right-4 p-2 rounded-xl bg-black/30 hover:bg-black/50 text-slate-300 hover:text-white transition-colors"
-              title="Close modal"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          )}
+          {/* Top right action buttons: Switch Account / Sign In + Close */}
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            {onSwitchAccount && (
+              <button
+                onClick={onSwitchAccount}
+                className="px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-amber-400/40 text-amber-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Open Sign In / Switch Account"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In / Switch Account</span>
+              </button>
+            )}
+            {hasAgreedNDA && (
+              <button
+                onClick={onClose}
+                className="p-2 rounded-xl bg-black/30 hover:bg-black/50 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
 
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 rounded-xl overflow-hidden bg-black ring-1 ring-red-400/50 shadow-md flex-shrink-0">
@@ -363,7 +381,7 @@ export const WelcomeTrainingHubModal: React.FC<WelcomeTrainingHubModalProps> = (
 
         {/* Footer Actions */}
         <div className="p-4 sm:p-5 bg-slate-950/90 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 flex-shrink-0">
-          <div className="text-xs text-slate-400 text-center sm:text-left">
+          <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start text-xs text-slate-400">
             {hasAgreedNDA ? (
               <span className="text-emerald-400 font-medium flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5" />
@@ -373,6 +391,16 @@ export const WelcomeTrainingHubModal: React.FC<WelcomeTrainingHubModalProps> = (
               <span className="text-slate-400">
                 Acceptance is required to unlock the Training Hub
               </span>
+            )}
+            {onSignOut && (
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-red-950/80 border border-slate-700 hover:border-red-700 text-slate-300 hover:text-red-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <LogOut className="w-3 h-3" />
+                <span>Sign Out to Login Page</span>
+              </button>
             )}
           </div>
 

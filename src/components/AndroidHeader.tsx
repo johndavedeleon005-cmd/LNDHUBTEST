@@ -297,23 +297,28 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
             </button>
           )}
 
-          {currentUser && currentUser.role !== 'master' && (
-            <span
-              className="hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold"
-              title={`Approved Staff Account: ${currentUser.email}`}
+          {currentUser && onOpenAuthModal && (
+            <button
+              onClick={onOpenAuthModal}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-all cursor-pointer"
+              title={`Signed in as ${currentUser.displayName} (${currentUser.email}) — Click to Switch Account or Sign In`}
             >
-              <UserCheck className="w-3 h-3 text-emerald-400" />
-              <span className="max-w-[110px] truncate">{currentUser.displayName}</span>
-            </span>
+              <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="max-w-[90px] truncate hidden sm:inline">
+                {currentUser.displayName.split(' ')[0]}
+              </span>
+              <span className="sm:hidden">Account</span>
+            </button>
           )}
 
           {currentUser && onSignOut ? (
             <button
               onClick={onSignOut}
-              className="p-2 rounded-full hover:bg-red-950/70 text-slate-400 hover:text-red-300 transition-all cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-red-950/70 hover:bg-red-900 border border-red-800/60 text-red-200 text-xs font-bold transition-all cursor-pointer"
               title={`Sign out (${currentUser.email})`}
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sign Out</span>
             </button>
           ) : (
             onOpenAuthModal && (
