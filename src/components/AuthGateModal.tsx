@@ -23,6 +23,12 @@ import {
   Check,
   Globe,
   ExternalLink,
+  Users,
+  Sparkles,
+  Award,
+  BookOpen,
+  ShieldAlert,
+  GraduationCap,
 } from 'lucide-react';
 import { PortalUser } from '../types/foodSafety';
 import {
@@ -95,6 +101,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   const [googleNdaTyping, setGoogleNdaTyping] = useState('');
   const [showDomainGuide, setShowDomainGuide] = useState(false);
   const [copiedDomain, setCopiedDomain] = useState(false);
+  const [isAboutLndModalOpen, setIsAboutLndModalOpen] = useState(false);
 
   const currentHostname =
     typeof window !== 'undefined' && window.location.hostname
@@ -375,11 +382,11 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   }
 
   // =========================================================================
-  // VIEW 2: PRIVATE SIGN IN / CREATE STAFF ACCOUNT GATE
+  // VIEW 2: PRIVATE SIGN IN / CREATE STAFF ACCOUNT GATE (WITH ABOUT L&D TEAM)
   // =========================================================================
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 select-none">
-      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch relative">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-3 sm:p-5 select-none">
+      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch relative">
         {onClose && (
           <button
             onClick={onClose}
@@ -390,90 +397,200 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
           </button>
         )}
 
-        {/* Left Column: Private Corporate Security Banner */}
-        <div className="lg:col-span-5 bg-gradient-to-br from-red-950/90 via-slate-900 to-slate-950 border border-red-800/40 rounded-3xl p-5 sm:p-6 flex flex-col justify-between space-y-5 shadow-2xl">
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl overflow-hidden bg-black ring-1 ring-red-500/60 shadow-lg shrink-0">
-                <img
-                  src="./assets/aistudio/JN_HOTPOT_LOGO_d76d212e.webp"
-                  alt="Jiangnan Hotpot Logo"
-                  className="w-full h-full object-cover"
+        {/* Left Column: Private Corporate Security Banner + About the L&D Team */}
+        <div className="lg:col-span-5 bg-gradient-to-br from-red-950/90 via-slate-900 to-slate-950 border border-red-800/40 rounded-3xl p-5 sm:p-6 flex flex-col justify-between space-y-4 shadow-2xl">
+          <div className="space-y-3.5">
+            {/* Top Brand & Animated L&D Logo Row */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl overflow-hidden bg-black ring-1 ring-red-500/60 shadow-lg shrink-0">
+                  <img
+                    src="./assets/aistudio/JN_HOTPOT_LOGO_d76d212e.webp"
+                    alt="Jiangnan Hotpot Logo"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs text-amber-400 font-semibold flex items-center gap-1.5">
+                    <Flame className="w-3.5 h-3.5 fill-amber-400" />
+                    <span>Imperial Kitchen Group Inc.</span>
+                  </div>
+                  <h1 className="text-base sm:text-lg font-black text-white tracking-tight">
+                    IKQA &amp; L&amp;D Training Hub
+                  </h1>
+                </div>
+              </div>
+
+              {/* Animated L&D Badge */}
+              <div
+                onClick={() => setIsAboutLndModalOpen(true)}
+                className="w-12 h-12 rounded-2xl overflow-hidden bg-white border-2 border-amber-500/60 shadow-md shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                title="Click to view About the L&D Team & Mission"
+              >
+                <video
+                  src="./assets/aistudio/ANIMATED_LND_LOGO_9bad3066.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-full h-full object-contain pointer-events-none"
                 />
               </div>
-              <div>
-                <div className="text-xs text-amber-400 font-semibold flex items-center gap-1.5">
-                  <Flame className="w-3.5 h-3.5 fill-amber-400" />
-                  <span>Imperial Kitchen Group Inc.</span>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-950/90 border border-red-700/60 text-red-200 text-[10px] font-bold">
+                <Lock className="w-3 h-3 text-amber-400" />
+                <span>STRICTLY PRIVATE INTERNAL PORTAL</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsAboutLndModalOpen(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 text-[10px] font-bold transition-colors cursor-pointer"
+              >
+                <Users className="w-3 h-3 text-amber-400" />
+                <span>Full L&amp;D Team &amp; Mission</span>
+              </button>
+            </div>
+
+            {/* About The Learning and Development (L&D) Team Card */}
+            <div className="bg-slate-950/95 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800/90">
+                <div className="flex items-center gap-1.5 text-red-400 font-bold text-xs">
+                  <Users className="w-3.5 h-3.5 text-amber-400" />
+                  <span>About the L&amp;D Team</span>
                 </div>
-                <h1 className="text-lg font-black text-white tracking-tight">
-                  IKQA &amp; L&amp;D Training Hub
-                </h1>
+                <span className="text-[10px] font-semibold text-slate-400 flex items-center gap-1">
+                  <Building2 className="w-3 h-3 text-slate-500" />
+                  <span>Imperial Kitchen Group</span>
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Developed by the Learning and Development Department to empower kitchen and service professionals in Food Safety Mastery, Standard Operating Procedures, and Career Excellence.
+              </p>
+
+              <div className="space-y-2">
+                {/* L&D Manager */}
+                <div className="bg-slate-900/90 p-2.5 rounded-xl border border-red-500/30 flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[9px] font-bold uppercase tracking-wider text-red-400">
+                      Learning &amp; Development Manager
+                    </div>
+                    <div className="text-xs sm:text-sm font-extrabold text-white">
+                      Joy Bernardo
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Department Leadership, Training Strategy &amp; Compliance Governance
+                    </div>
+                  </div>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-950 text-red-300 border border-red-700/50 shrink-0">
+                    Leadership
+                  </span>
+                </div>
+
+                {/* L&D Specialists (FSCO) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="bg-slate-900/90 p-2.5 rounded-xl border border-amber-500/25 space-y-0.5">
+                    <div className="text-[9px] font-bold uppercase tracking-wider text-amber-400">
+                      L&amp;D Specialist
+                    </div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1 flex-wrap">
+                      <span>John Dave De Leon</span>
+                      <span className="px-1 py-0.2 rounded text-[9px] font-extrabold bg-amber-950 text-amber-300 border border-amber-700/50">
+                        FSCO
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Food Safety Compliance &amp; Kitchen Standards
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/90 p-2.5 rounded-xl border border-amber-500/25 space-y-0.5">
+                    <div className="text-[9px] font-bold uppercase tracking-wider text-amber-400">
+                      L&amp;D Specialist
+                    </div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1 flex-wrap">
+                      <span>Lany Ann Nemenzo</span>
+                      <span className="px-1 py-0.2 rounded text-[9px] font-extrabold bg-amber-950 text-amber-300 border border-amber-700/50">
+                        FSCO
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Service Standards &amp; Operational Sequences
+                    </div>
+                  </div>
+                </div>
+
+                {/* L&D Coordinator */}
+                <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                      L&amp;D Training Coordinator
+                    </div>
+                    <div className="text-xs font-bold text-white">
+                      Dice Divine Torralba
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Training Administration, Scheduling &amp; Staff Assessment Records
+                    </div>
+                  </div>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
+                    Coordination
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-950/90 border border-red-700/60 text-red-200 text-[11px] font-bold">
-              <Lock className="w-3.5 h-3.5 text-amber-400" />
-              <span>STRICTLY PRIVATE INTERNAL PORTAL</span>
-            </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Access to Imperial Kitchen Group Inc. and Jiangnan Hotpot SOPs, Policies, Station Checklists, AI Virtual Support, and Training Simulators is strictly restricted to authenticated and Master-approved personnel.
-            </p>
-
-            <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 space-y-2.5 text-xs">
+            {/* Compact Access & Approval Policy */}
+            <div className="bg-slate-950/80 border border-slate-800/90 rounded-2xl p-3 space-y-1.5 text-[11px]">
               <div className="font-bold text-amber-300 flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
                 <span>Access &amp; Approval Policy</span>
               </div>
-              <ul className="space-y-2 text-[11px] text-slate-300 leading-relaxed">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+              <ul className="space-y-1 text-[10px] text-slate-300 leading-relaxed">
+                <li className="flex items-start gap-1.5">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
                   <span>
-                    <strong>Approved Personnel:</strong> Sign in with your verified credentials or authorized Google account to unlock the training hub.
+                    <strong>Approved Personnel:</strong> Sign in with verified credentials to unlock the hub.
                   </span>
                 </li>
-                <li className="flex items-start gap-2">
-                  <FileSignature className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <li className="flex items-start gap-1.5">
+                  <FileSignature className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
                   <span>
-                    <strong>Mandatory NDA Acceptance:</strong> Creating a new staff account requires manually typing <code>&quot;I AGREE&quot;</code> to accept the Company Confidentiality Agreement.
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                  <span>
-                    <strong>Master Account Approval:</strong> Newly registered accounts remain locked in <em>Pending</em> status until reviewed and approved by the Master Account.
+                    <strong>Mandatory NDA:</strong> New staff must manually type <code>&quot;I AGREE&quot;</code> and await Master Account approval.
                   </span>
                 </li>
               </ul>
             </div>
           </div>
 
-          <div className="pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center justify-between">
+          <div className="pt-2.5 border-t border-slate-800/80 text-[10px] text-slate-400 flex items-center justify-between">
             <span>RA 10611 &amp; PD 856 Compliant</span>
-            <span>Authorized Personnel Only</span>
+            <span>Imperial Kitchen Group L&amp;D</span>
           </div>
         </div>
 
         {/* Right Column: Sign In / Create Staff Account Form */}
         <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl space-y-4">
           <div className="space-y-4">
-            {/* Mode Switcher Tabs */}
-            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+            {/* Mode Switcher Tabs + About L&D Team Button */}
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800">
               <button
                 type="button"
                 onClick={() => {
                   setMode('signin');
                   setError(null);
                 }}
-                className={`py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+                className={`py-2.5 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                   mode === 'signin'
                     ? 'bg-red-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <LogIn className="w-4 h-4" />
-                <span>Sign In</span>
+                <LogIn className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Sign In</span>
               </button>
               <button
                 type="button"
@@ -481,14 +598,22 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                   setMode('register');
                   setError(null);
                 }}
-                className={`py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+                className={`py-2.5 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                   mode === 'register'
                     ? 'bg-amber-500 text-slate-950 shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <UserPlus className="w-4 h-4" />
-                <span>Create Staff Account</span>
+                <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Create Account</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsAboutLndModalOpen(true)}
+                className="py-2.5 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 text-amber-300 hover:bg-slate-900 border border-amber-500/30 transition-colors cursor-pointer"
+              >
+                <Users className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="truncate">About L&amp;D Team</span>
               </button>
             </div>
 
@@ -877,6 +1002,206 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Full About the Learning & Development Team & Mission Modal */}
+      {isAboutLndModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/90 backdrop-blur-md overflow-y-auto"
+          onClick={() => setIsAboutLndModalOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header Banner */}
+            <div className="relative bg-gradient-to-r from-red-900 via-red-800 to-amber-900 px-6 py-5 text-white border-b border-red-700/50 shrink-0">
+              <button
+                onClick={() => setIsAboutLndModalOpen(false)}
+                className="absolute top-4 right-4 p-2 rounded-xl bg-black/30 hover:bg-black/50 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-xl overflow-hidden bg-black ring-1 ring-red-400/50 shadow-md shrink-0">
+                  <img
+                    src="./assets/aistudio/JN_HOTPOT_LOGO_d76d212e.webp"
+                    alt="Jiangnan Hotpot Logo"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wider uppercase bg-amber-500 text-slate-950 shadow-sm flex items-center gap-1">
+                    <Flame className="w-3.5 h-3.5 fill-current" />
+                    Jiangnan Hotpot • Imperial Kitchen Group
+                  </span>
+                </div>
+              </div>
+
+              <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-white flex items-center gap-2">
+                <GraduationCap className="w-6 h-6 text-amber-300 shrink-0" />
+                <span>About the Learning and Development Team</span>
+              </h2>
+              <p className="mt-1 text-xs text-red-100/90 leading-relaxed">
+                The centralized training, quality assurance, and standard operating procedures department for Imperial Kitchen Group Inc. and Jiangnan Hotpot.
+              </p>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-5 text-slate-200 text-sm leading-relaxed">
+              {/* Animated L&D Logo Video */}
+              <div className="flex flex-col items-center justify-center">
+                <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden bg-white shadow-xl border-2 border-amber-500/50 ring-4 ring-red-900/30 flex items-center justify-center">
+                  <video
+                    src="./assets/aistudio/ANIMATED_LND_LOGO_9bad3066.mp4"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-contain pointer-events-none"
+                  />
+                </div>
+              </div>
+
+              {/* Mission & Purpose */}
+              <div className="bg-slate-800/70 rounded-xl p-4 sm:p-5 border border-slate-700">
+                <div className="flex items-center gap-2 mb-2 text-amber-400 font-bold text-sm">
+                  <Sparkles className="w-4 h-4" />
+                  <span>Our Mission &amp; Purpose</span>
+                </div>
+                <p className="text-slate-300 text-xs sm:text-sm leading-relaxed">
+                  This hub is developed to help employees improve their operational efficiency, master food safety compliance, uphold five-star culinary standards, and build long-term career growth. By providing instantaneous digital access to our complete Standard Operating Procedures (SOPs), Quality Assurance Policies (IKQAP), practical kitchen checklists, and AI-assisted compliance guidance, this platform empowers every kitchen and service team member to deliver exceptional guest experiences safely, consistently, and with pride.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-4">
+                  <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50">
+                    <div className="text-red-400 font-semibold text-xs flex items-center gap-1.5 mb-1">
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                      <span>Food Safety Mastery</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      HACCP, allergen defense, FIFO/FEFO storage &amp; strict sanitation controls.
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50">
+                    <div className="text-amber-400 font-semibold text-xs flex items-center gap-1.5 mb-1">
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Standard Operating Procedures</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Precise portioning, wire slicing, pest control &amp; hygiene discipline.
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50">
+                    <div className="text-emerald-400 font-semibold text-xs flex items-center gap-1.5 mb-1">
+                      <Award className="w-3.5 h-3.5" />
+                      <span>Career Excellence</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Continuous employee audits, skill assessments &amp; knowledge recognition.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* L&D Team Directory */}
+              <div className="bg-gradient-to-br from-slate-800/80 via-slate-800/40 to-slate-900 rounded-xl p-4 sm:p-5 border border-slate-700">
+                <div className="flex items-center justify-between mb-3.5 pb-2 border-b border-slate-700/70">
+                  <div className="flex items-center gap-2 text-red-400 font-bold text-sm">
+                    <Users className="w-4 h-4" />
+                    <span>The Learning and Development Team</span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
+                    <Building2 className="w-3 h-3 text-slate-500" />
+                    <span>Imperial Kitchen Group</span>
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="bg-slate-900/80 p-3.5 rounded-lg border border-red-500/20 flex items-start justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-red-400">
+                        Learning and Development Manager
+                      </div>
+                      <div className="text-base font-extrabold text-white">Joy Bernardo</div>
+                      <div className="text-[11px] text-slate-400">
+                        Department Leadership, Training Strategy &amp; Compliance Governance
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-950 text-red-300 border border-red-700/50 shrink-0">
+                      Leadership
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-slate-900/80 p-3 rounded-lg border border-amber-500/20 space-y-1">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                        Learning and Development Specialist
+                      </div>
+                      <div className="text-sm font-bold text-white flex items-center gap-1.5">
+                        <span>John Dave De Leon</span>
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-amber-950 text-amber-300 border border-amber-700/50">
+                          FSCO
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        Food Safety Compliance &amp; Kitchen Standards
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900/80 p-3 rounded-lg border border-amber-500/20 space-y-1">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                        Learning and Development Specialist
+                      </div>
+                      <div className="text-sm font-bold text-white flex items-center gap-1.5">
+                        <span>Lany Ann Nemenzo</span>
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-amber-950 text-amber-300 border border-amber-700/50">
+                          FSCO
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        Service Standards and Operational Sequences
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-700 flex items-start justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Learning and Development Training Coordinator
+                      </div>
+                      <div className="text-sm font-bold text-white">Dice Divine Torralba</div>
+                      <div className="text-[11px] text-slate-400">
+                        Training Administration, Session Scheduling &amp; Staff Assessment Records
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
+                      Coordination
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-3 shrink-0">
+              <span className="text-xs text-slate-400">
+                Imperial Kitchen Group Inc. • L&amp;D Department
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsAboutLndModalOpen(false)}
+                className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
+              >
+                Back to Sign In
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
