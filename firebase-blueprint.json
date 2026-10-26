@@ -1,0 +1,211 @@
+{
+  "entities": {
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted master admin marker document keyed by user UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the master administrator."
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when master privileges were granted."
+        }
+      },
+      "required": ["uid", "grantedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Staff or Master account profile with approval status and role.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique user identifier matching Firebase Auth UID."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "User email address."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Employee full name."
+        },
+        "position": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Staff designation or role title."
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "Assigned Jiangnan Hotpot branch or commissary."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["master", "staff"],
+          "description": "Access control tier: master or staff."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Master account approval state."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Account creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last profile or approval update server timestamp."
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "position",
+        "branch",
+        "role",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CustomDocument": {
+      "title": "CustomDocument",
+      "description": "Master-uploaded SOP, Policy, Guide, or Station Checklist integrated with AI and games.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Document identifier."
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Official document code (e.g., IKQA-SOP#013, JNLD-CHK-FOH-002)."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240,
+          "description": "Document title."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["policy", "sop", "guide", "checklist"],
+          "description": "Classification of compliance document."
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Department category."
+        },
+        "revision": {
+          "type": "number",
+          "description": "Document revision number."
+        },
+        "effectiveDate": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Effective date string."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "Executive summary of the document."
+        },
+        "contentBody": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50000,
+          "description": "Full plain-text / markdown content for AI and game grounding."
+        },
+        "keyTakeaways": {
+          "type": "string",
+          " maxLength": 10000,
+          "minLength": 1,
+          "description": "Pipe-separated or bulleted key takeaways."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["approved_staff", "master_only"],
+          "description": "Visibility scope for list query enforcement."
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the Master user who uploaded the document."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "code",
+        "title",
+        "type",
+        "category",
+        "revision",
+        "effectiveDate",
+        "summary",
+        "contentBody",
+        "keyTakeaways",
+        "visibility",
+        "authorId",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Trusted collection of master admin UIDs."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User accounts requiring Master Account approval before accessing the portal."
+    },
+    "/custom_documents/{docId}": {
+      "schema": { "$ref": "#/entities/CustomDocument" },
+      "description": "Master-uploaded SOPs, Policies, Guides, and Station Checklists."
+    }
+  }
+}

@@ -1,0 +1,235 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'johndavedeleon005@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'grantedAt']) &&
+        data.keys().hasOnly(['uid', 'grantedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.grantedAt is timestamp;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid',
+          'email',
+          'displayName',
+          'position',
+          'branch',
+          'role',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'position',
+          'branch',
+          'role',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.position is string && data.position.size() >= 1 && data.position.size() <= 120 &&
+        data.branch is string && data.branch.size() >= 1 && data.branch.size() <= 160 &&
+        (data.role == 'master' || data.role == 'staff') &&
+        (data.status == 'pending' || data.status == 'approved' || data.status == 'rejected') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCustomDocument(data) {
+      return data.keys().hasAll([
+          'id',
+          'code',
+          'title',
+          'type',
+          'category',
+          'revision',
+          'effectiveDate',
+          'summary',
+          'contentBody',
+          'keyTakeaways',
+          'visibility',
+          'authorId',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'code',
+          'title',
+          'type',
+          'category',
+          'revision',
+          'effectiveDate',
+          'summary',
+          'contentBody',
+          'keyTakeaways',
+          'visibility',
+          'authorId',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.code is string && data.code.size() >= 1 && data.code.size() <= 64 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 240 &&
+        (data.type == 'policy' || data.type == 'sop' || data.type == 'guide' || data.type == 'checklist') &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 120 &&
+        data.revision is number && data.revision >= 1 && data.revision <= 1000 &&
+        data.effectiveDate is string && data.effectiveDate.size() >= 1 && data.effectiveDate.size() <= 64 &&
+        data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 4000 &&
+        data.contentBody is string && data.contentBody.size() >= 1 && data.contentBody.size() <= 50000 &&
+        data.keyTakeaways is string && data.keyTakeaways.size() >= 1 && data.keyTakeaways.size() <= 10000 &&
+        (data.visibility == 'approved_staff' || data.visibility == 'master_only') &&
+        data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 && data.authorId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 4. Collection Rules: /admins/{adminId}
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(adminId) && isValidAdminRecord(incoming()) && isAdmin() && incoming().uid == adminId && incoming().grantedAt == request.time;
+      allow update: if false;
+      allow delete: if isVerifiedUser() && isValidId(adminId) && isAdmin();
+    }
+
+    // 5. Collection Rules: /users/{userId}
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        request.auth.uid == userId &&
+        incoming().email == request.auth.token.email &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (incoming().role == 'staff' && incoming().status == 'pending') ||
+          isAdmin()
+        );
+
+      allow update: if isValidUserProfile(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(userId) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Action 1: Owner updates own profile metadata without changing role or approval status
+          (
+            request.auth.uid == userId &&
+            incoming().role == existing().role &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'position', 'branch', 'updatedAt'])
+          ) ||
+          // Action 2: Master Admin approves/rejects account or updates role/profile
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'displayName', 'position', 'branch', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(userId) && isAdmin();
+    }
+
+    // 6. Collection Rules: /custom_documents/{docId}
+    match /custom_documents/{docId} {
+      allow get: if isSignedIn() &&
+        isValidId(docId) &&
+        (
+          resource.data.authorId == request.auth.uid ||
+          isAdmin() ||
+          (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved'
+          )
+        );
+
+      allow list: if isSignedIn() &&
+        (
+          resource.data.visibility == 'approved_staff' ||
+          resource.data.authorId == request.auth.uid ||
+          isAdmin()
+        );
+
+      allow create: if isVerifiedUser() &&
+        isValidId(docId) &&
+        isValidCustomDocument(incoming()) &&
+        isAdmin() &&
+        incoming().id == docId &&
+        incoming().authorId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidCustomDocument(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(docId) &&
+        isAdmin() &&
+        incoming().id == existing().id &&
+        incoming().authorId == existing().authorId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'code',
+          'title',
+          'type',
+          'category',
+          'revision',
+          'effectiveDate',
+          'summary',
+          'contentBody',
+          'keyTakeaways',
+          'visibility',
+          'updatedAt'
+        ]);
+
+      allow delete: if isVerifiedUser() && isValidId(docId) && isAdmin();
+    }
+  }
+}

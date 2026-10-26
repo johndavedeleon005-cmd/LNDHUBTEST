@@ -1,0 +1,97 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare pre-built production bundle
+        run: |
+          rm -rf dist
+          mkdir -p dist
+          cp -r public/* dist/
+          cp public/gh-pages-bundle/index.html dist/index.html
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        continue-on-error: true
+        with:
+          node-version: 22
+
+      - name: Rebuild Vite bundle if registry packages resolve
+        continue-on-error: true
+        run: |
+          if npm install --legacy-peer-deps --no-audit --no-fund; then
+            npm run build
+            cp dist/index.html dist/404.html
+            touch dist/.nojekyll
+          fi
+
+      - name: Verify dist output
+        run: |
+          if [ ! -f dist/index.html ]; then
+            mkdir -p dist
+            cp -r public/* dist/
+            cp public/gh-pages-bundle/index.html dist/index.html
+          fi
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
+          ls -la dist
+
+      - name: Configure GitHub Pages
+        id: configure_pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+        with:
+          enablement: true
+
+      - name: Upload artifact
+        id: upload_artifact
+        uses: actions/upload-pages-artifact@v3
+        continue-on-error: true
+        with:
+          path: './dist'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        if: steps.upload_artifact.outcome == 'success'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Sync gh-pages branch fallback
+        if: steps.deployment.outcome != 'success'
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git worktree add --detach /tmp/gh-pages-deploy
+          rm -rf /tmp/gh-pages-deploy/* /tmp/gh-pages-deploy/.[!.]* 2>/dev/null || true
+          cp -r dist/. /tmp/gh-pages-deploy/
+          cd /tmp/gh-pages-deploy
+          git checkout --orphan gh-pages-temp
+          git add -A
+          git commit -m "chore: deploy static bundle to gh-pages" || true
+          git push origin HEAD:refs/heads/gh-pages --force

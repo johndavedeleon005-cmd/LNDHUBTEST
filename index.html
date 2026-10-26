@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>IKQA Food Safety & Compliance Portal</title>
+    <link rel="icon" type="image/webp" href="./assets/aistudio/JN_HOTPOT_LOGO_d76d212e.webp" />
+    <link rel="apple-touch-icon" href="./assets/aistudio/JN_HOTPOT_LOGO_d76d212e.webp" />
+    <meta name="description" content="Android in-house food safety & compliance library for Imperial Kitchen Group Inc. and Jiangnan Hotpot staff, featuring comprehensive policies, SOPs, visual cheat-sheets, and text-to-speech reading." />
+    <meta property="og:title" content="IKQA Food Safety & Compliance Portal" />
+    <meta property="og:description" content="Android in-house food safety & compliance library for Imperial Kitchen Group Inc. and Jiangnan Hotpot staff, featuring comprehensive policies, SOPs, visual cheat-sheets, and text-to-speech reading." />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#b91c1c" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+      html, body {
+        background-color: #020617;
+        color: #f1f5f9;
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      }
+    </style>
+    <script>
+      // Automatic fallback for GitHub Pages when served directly from repository root branch (without Vite build)
+      (function () {
+        // Rewrite ./assets/aistudio/* to ./public/assets/aistudio/* if served from raw repo root
+        window.addEventListener(
+          'error',
+          function (e) {
+            var target = e.target;
+            if (target && (target.tagName === 'IMG' || target.tagName === 'VIDEO')) {
+              var src = target.getAttribute('src') || '';
+              if (src.indexOf('./assets/aistudio/') === 0 && !target.dataset.retriedPublic) {
+                target.dataset.retriedPublic = 'true';
+                target.setAttribute('src', './public/' + src.slice(2));
+                if (target.tagName === 'VIDEO' && typeof target.load === 'function') {
+                  target.load();
+                  target.play().catch(function () {});
+                }
+              }
+            }
+          },
+          true
+        );
+
+        var fallbackLoaded = false;
+        window.__loadStaticFallback = function () {
+          if (fallbackLoaded || window.__IKQA_MOUNTED__) return;
+          fallbackLoaded = true;
+
+          var css1 = document.createElement('link');
+          css1.rel = 'stylesheet';
+          css1.href = './public/gh-pages-bundle/app.css';
+          document.head.appendChild(css1);
+
+          var css2 = document.createElement('link');
+          css2.rel = 'stylesheet';
+          css2.href = './gh-pages-bundle/app.css';
+          document.head.appendChild(css2);
+
+          var s1 = document.createElement('script');
+          s1.type = 'module';
+          s1.src = './public/gh-pages-bundle/app.js';
+          s1.onerror = function () {
+            var s2 = document.createElement('script');
+            s2.type = 'module';
+            s2.src = './gh-pages-bundle/app.js';
+            document.body.appendChild(s2);
+          };
+          document.body.appendChild(s1);
+        };
+
+        window.addEventListener('DOMContentLoaded', function () {
+          setTimeout(function () {
+            if (!window.__IKQA_MOUNTED__) {
+              window.__loadStaticFallback();
+            }
+          }, 450);
+        });
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-950 text-slate-100 antialiased selection:bg-red-500 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx" onerror="window.__loadStaticFallback && window.__loadStaticFallback()"></script>
+  </body>
+</html>

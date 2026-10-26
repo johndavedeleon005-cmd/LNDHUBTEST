@@ -1,0 +1,8 @@
+{
+  "name": "JN COPY OF APP",
+  "description": "Android in-house food safety \u0026 compliance library for Imperial Kitchen Group Inc. and Jiangnan Hotpot staff, featuring comprehensive policies, SOPs, visual cheat-sheets, and text-to-speech reading.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
