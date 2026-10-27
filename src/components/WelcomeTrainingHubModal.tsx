@@ -149,12 +149,12 @@ export const WelcomeTrainingHubModal: React.FC<WelcomeTrainingHubModalProps> = (
           {/* Animated L&D Logo Video Showcase (GIF-style continuous loop, un-pausable while modal is open) */}
           <div className="flex flex-col items-center justify-center">
             <div 
-              className="relative w-48 h-48 sm:w-56 sm:h-56 rounded-2xl overflow-hidden bg-white shadow-xl border-2 border-amber-500/50 ring-4 ring-red-900/30 flex items-center justify-center select-none"
+              className="relative w-48 h-48 sm:w-56 sm:h-56 rounded-2xl overflow-hidden bg-black shadow-xl border-2 border-amber-500/50 ring-4 ring-red-900/30 flex items-center justify-center select-none"
               onContextMenu={(e) => e.preventDefault()}
             >
               <video
                 ref={videoRef}
-                src="./assets/aistudio/ANIMATED_LND_LOGO_9bad3066.mp4"
+                src="./assets/aistudio/NEW_LOGO_ANIMATION_e69a8263.mp4"
                 autoPlay
                 loop
                 muted

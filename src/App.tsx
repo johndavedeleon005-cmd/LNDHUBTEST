@@ -48,6 +48,8 @@ import {
   Upload,
   UserCheck,
   UserX,
+  Lock,
+  LogOut,
 } from 'lucide-react';
 
 export default function App() {
@@ -216,38 +218,85 @@ export default function App() {
   }, [isApprovedUser, loadPortalCustomDocs]);
 
   useEffect(() => {
-    if (currentUser?.role !== 'master') {
+    if (!currentUser) {
       setPendingApprovalsCount(0);
       setPendingAccountsList([]);
       return;
     }
     const unsub = subscribeToPortalAccounts((accounts) => {
-      const pending = accounts.filter((a) => a.role !== 'master' && a.status === 'pending');
-      setPendingApprovalsCount(pending.length);
-      setPendingAccountsList(pending);
+      if (currentUser.role === 'master') {
+        const pending = accounts.filter((a) => a.role !== 'master' && a.status === 'pending');
+        setPendingApprovalsCount(pending.length);
+        setPendingAccountsList(pending);
+      } else {
+        setPendingApprovalsCount(0);
+        setPendingAccountsList([]);
+      }
+
+      // If the Master Account updated this user's Name, Position, Branch, or Status in the Hub, sync it immediately
+      const matchedSelf = accounts.find(
+        (a) =>
+          a.uid === currentUser.uid ||
+          a.email.toLowerCase() === currentUser.email.toLowerCase()
+      );
+      if (
+        matchedSelf &&
+        (matchedSelf.displayName !== currentUser.displayName ||
+          matchedSelf.position !== currentUser.position ||
+          matchedSelf.branch !== currentUser.branch ||
+          matchedSelf.status !== currentUser.status ||
+          matchedSelf.role !== currentUser.role)
+      ) {
+        setCurrentUser((prev) =>
+          prev
+            ? {
+                ...prev,
+                displayName: matchedSelf.displayName,
+                position: matchedSelf.position,
+                branch: matchedSelf.branch,
+                status: matchedSelf.status,
+                role: matchedSelf.role,
+              }
+            : prev
+        );
+      }
     });
     return () => unsub();
-  }, [currentUser?.role]);
+  }, [
+    currentUser?.uid,
+    currentUser?.email,
+    currentUser?.role,
+    currentUser?.displayName,
+    currentUser?.position,
+    currentUser?.branch,
+    currentUser?.status,
+  ]);
 
-  // Verify user approval status on mount if signed in as non-master
+  // Verify user approval & profile status on mount
   useEffect(() => {
-    if (currentUser && currentUser.role !== 'master') {
+    if (currentUser) {
       checkCurrentAccountStatus(currentUser).then((updated) => {
-        if (updated && updated.status !== currentUser.status) {
+        if (
+          updated &&
+          (updated.status !== currentUser.status ||
+            updated.displayName !== currentUser.displayName ||
+            updated.position !== currentUser.position ||
+            updated.branch !== currentUser.branch)
+        ) {
           setCurrentUser(updated);
         }
       });
     }
   }, [currentUser?.uid]);
 
-  // Sync staff profile when currentUser changes
+  // Strictly lock staffName, staffPosition & staffBranch to the signed-in account's recorded details
   useEffect(() => {
     if (currentUser) {
-      if (currentUser.displayName) setStaffName(currentUser.displayName);
-      if (currentUser.position) setStaffPosition(currentUser.position);
-      if (currentUser.branch) setStaffBranch(currentUser.branch);
+      setStaffName(currentUser.displayName || 'Staff Member');
+      setStaffPosition(currentUser.position || 'Restaurant Staff');
+      setStaffBranch(currentUser.branch || 'Jiangnan Hotpot - SM Mall of Asia');
     }
-  }, [currentUser]);
+  }, [currentUser?.displayName, currentUser?.position, currentUser?.branch]);
 
   // Persist bookmarks
   useEffect(() => {
@@ -483,6 +532,60 @@ export default function App() {
             />
           ) : (
             <div className="p-4 space-y-4">
+              {/* SIGNED-IN ACCOUNT & LOCKED CERTIFICATE IDENTITY BAR (WITH LOG IN / SWITCH ACCOUNT & LOG OUT) */}
+              {currentUser && (
+                <div className="bg-slate-900/95 border border-slate-800 rounded-2xl px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-950/90 text-emerald-300 border border-emerald-700/60 text-[10px] font-mono font-bold">
+                      <Lock className="w-3 h-3 text-emerald-400" />
+                      <span>Certificate Identity Locked</span>
+                    </span>
+                    <div className="text-xs text-slate-200 truncate">
+                      <span className="font-bold text-white">{staffName}</span>
+                      <span className="text-slate-500 mx-1.5">·</span>
+                      <span className="text-amber-300 font-semibold">{staffPosition}</span>
+                      <span className="text-slate-500 mx-1.5 hidden md:inline">·</span>
+                      <span className="text-slate-400 hidden md:inline">{staffBranch}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    {currentUser.role === 'master' ? (
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('master')}
+                        className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Crown className="w-3 h-3 text-amber-400" />
+                        <span>Edit Staff Names/Positions in Hub</span>
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-mono hidden lg:inline">
+                        Only Master Account can modify Name &amp; Position
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setIsAuthModalOpen(true)}
+                      className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <UserCheck className="w-3 h-3 text-emerald-400" />
+                      <span>Log In / Switch Account</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSignOut}
+                      className="px-2.5 py-1 rounded-xl bg-red-950/80 hover:bg-red-900 text-red-200 border border-red-800/60 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <LogOut className="w-3 h-3" />
+                      <span>Log Out</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* LIVE INCOMING STAFF ACCOUNT APPROVAL REQUESTS BANNER FOR MASTER ACCOUNT */}
               {currentUser?.role === 'master' &&
                 pendingAccountsList.length > 0 &&
@@ -1032,13 +1135,12 @@ export default function App() {
                   documents={documents}
                   readDocIds={readDocIds}
                   staffName={staffName}
-                  setStaffName={setStaffName}
                   staffPosition={staffPosition}
-                  setStaffPosition={setStaffPosition}
                   staffBranch={staffBranch}
-                  setStaffBranch={setStaffBranch}
                   onOpenDoc={(d) => handleInitiateViewDoc(d)}
                   onOpenWelcomeModal={() => setIsWelcomeOpen(true)}
+                  isMasterAccount={currentUser?.role === 'master'}
+                  onOpenMasterHub={() => setActiveTab('master')}
                 />
               )}
 
@@ -1072,6 +1174,27 @@ export default function App() {
                     setActiveTab('assistant');
                   }}
                   onAccountsChanged={(pendingCount) => setPendingApprovalsCount(pendingCount)}
+                  onAccountProfileUpdated={(updatedAcc) => {
+                    if (
+                      currentUser &&
+                      (updatedAcc.uid === currentUser.uid ||
+                        updatedAcc.email.toLowerCase() === currentUser.email.toLowerCase())
+                    ) {
+                      setCurrentUser((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              displayName: updatedAcc.displayName,
+                              position: updatedAcc.position,
+                              branch: updatedAcc.branch,
+                            }
+                          : prev
+                      );
+                      setStaffName(updatedAcc.displayName);
+                      setStaffPosition(updatedAcc.position);
+                      setStaffBranch(updatedAcc.branch);
+                    }
+                  }}
                 />
               )}
             </div>

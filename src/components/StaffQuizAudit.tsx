@@ -23,26 +23,27 @@ interface StaffQuizAuditProps {
   documents: FoodSafetyDoc[];
   readDocIds: string[];
   staffName: string;
-  setStaffName: (name: string) => void;
+  setStaffName?: (name: string) => void;
   staffPosition: string;
-  setStaffPosition: (pos: string) => void;
+  setStaffPosition?: (pos: string) => void;
   staffBranch: string;
-  setStaffBranch: (branch: string) => void;
+  setStaffBranch?: (branch: string) => void;
   onOpenDoc: (doc: FoodSafetyDoc) => void;
   onOpenWelcomeModal?: () => void;
+  isMasterAccount?: boolean;
+  onOpenMasterHub?: () => void;
 }
 
 export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
   documents,
   readDocIds,
   staffName,
-  setStaffName,
   staffPosition,
-  setStaffPosition,
   staffBranch,
-  setStaffBranch,
   onOpenDoc,
   onOpenWelcomeModal,
+  isMasterAccount = false,
+  onOpenMasterHub,
 }) => {
   // Aggregate all quiz questions across all documents
   const allQuestions = documents.flatMap((d) =>
@@ -126,11 +127,29 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
       {/* Staff ID, Position & Branch Profile Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <h2 className="text-sm font-bold text-white flex items-center gap-2">
-            <User className="w-4 h-4 text-red-400" />
-            <span>Staff Compliance Profile</span>
-          </h2>
-          <div className="flex items-center gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <User className="w-4 h-4 text-red-400" />
+              <span>Staff Compliance &amp; Certificate Identity (Sign-In Locked)</span>
+            </h2>
+            <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
+              <Lock className="w-3 h-3 text-amber-400 shrink-0" />
+              <span>
+                Recorded from your Sign-In Account for official certificates. Staff cannot edit Name or Position — only the Master Account can modify via the Master Hub.
+              </span>
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {isMasterAccount && onOpenMasterHub && (
+              <button
+                type="button"
+                onClick={onOpenMasterHub}
+                className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] flex items-center gap-1 cursor-pointer"
+              >
+                <Lock className="w-3 h-3" />
+                <span>Edit Staff Names &amp; Positions in Master Hub</span>
+              </button>
+            )}
             {hasPassedHistory && (
               <button
                 onClick={() => setIsCertModalOpen(true)}
@@ -148,42 +167,54 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label className="text-[11px] text-slate-400 font-medium block mb-1">
-              Employee Full Name:
+            <label className="text-[11px] text-slate-400 font-medium flex items-center justify-between mb-1">
+              <span>Employee Full Name (For Certificates):</span>
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-400">
+                <Lock className="w-2.5 h-2.5" />
+                <span>Locked</span>
+              </span>
             </label>
-            <input
-              type="text"
-              value={staffName}
-              onChange={(e) => setStaffName(e.target.value)}
-              placeholder="e.g. Maria Santos"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500"
-            />
+            <div
+              className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white flex items-center justify-between select-none"
+              title="Recorded on Sign-In Page — Only Master Account can change via Master Hub"
+            >
+              <span className="truncate">{staffName || 'Staff Member'}</span>
+              <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0 ml-2" />
+            </div>
           </div>
 
           <div>
-            <label className="text-[11px] text-slate-400 font-medium block mb-1">
-              Position / Designation:
+            <label className="text-[11px] text-slate-400 font-medium flex items-center justify-between mb-1">
+              <span>Position / Designation (For Certificates):</span>
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-400">
+                <Lock className="w-2.5 h-2.5" />
+                <span>Locked</span>
+              </span>
             </label>
-            <input
-              type="text"
-              value={staffPosition}
-              onChange={(e) => setStaffPosition(e.target.value)}
-              placeholder="e.g. Kitchen Shift Lead"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500"
-            />
+            <div
+              className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white flex items-center justify-between select-none"
+              title="Recorded on Sign-In Page — Only Master Account can change via Master Hub"
+            >
+              <span className="truncate">{staffPosition || 'Restaurant Staff'}</span>
+              <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0 ml-2" />
+            </div>
           </div>
 
           <div>
-            <label className="text-[11px] text-slate-400 font-medium block mb-1">
-              Branch / Store Location:
+            <label className="text-[11px] text-slate-400 font-medium flex items-center justify-between mb-1">
+              <span>Branch / Store Location:</span>
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-400">
+                <Lock className="w-2.5 h-2.5" />
+                <span>Locked</span>
+              </span>
             </label>
-            <input
-              type="text"
-              value={staffBranch}
-              onChange={(e) => setStaffBranch(e.target.value)}
-              placeholder="e.g. Jiangnan Hotpot - SM Mall of Asia"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500"
-            />
+            <div
+              className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white flex items-center justify-between select-none"
+              title="Recorded on Sign-In Page — Only Master Account can change via Master Hub"
+            >
+              <span className="truncate">{staffBranch || 'Jiangnan Hotpot'}</span>
+              <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0 ml-2" />
+            </div>
           </div>
         </div>
 
@@ -471,11 +502,6 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
         score={isSubmitted && passed ? score : lastPassedScore}
         totalQuestions={10}
         completedAt={certCompletedAt}
-        onUpdateStaffProfile={(name, pos, branch) => {
-          setStaffName(name);
-          setStaffPosition(pos);
-          setStaffBranch(branch);
-        }}
       />
     </div>
   );

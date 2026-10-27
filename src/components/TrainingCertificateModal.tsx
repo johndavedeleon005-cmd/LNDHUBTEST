@@ -41,20 +41,11 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
   score = 10,
   totalQuestions = 10,
   completedAt,
-  onUpdateStaffProfile,
 }) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [tempName, setTempName] = useState(staffName || 'Staff Member');
-  const [tempPosition, setTempPosition] = useState(staffPosition || 'Kitchen Shift Lead');
-  const [tempBranch, setTempBranch] = useState(staffBranch || 'Jiangnan Hotpot - SM Mall of Asia');
+  const lockedName = staffName || 'Staff Member';
+  const lockedPosition = staffPosition || 'Kitchen Shift Lead';
+  const lockedBranch = staffBranch || 'Jiangnan Hotpot - SM Mall of Asia';
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
-
-  // Synchronize when props update
-  useEffect(() => {
-    setTempName(staffName || 'Staff Member');
-    setTempPosition(staffPosition || 'Kitchen Shift Lead');
-    setTempBranch(staffBranch || 'Jiangnan Hotpot - SM Mall of Asia');
-  }, [staffName, staffPosition, staffBranch]);
 
   // Current date and time formatted
   const [dateTimeStr, setDateTimeStr] = useState('');
@@ -84,19 +75,12 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
 
   if (!isOpen) return null;
 
-  const handleSaveProfile = () => {
-    if (onUpdateStaffProfile) {
-      onUpdateStaffProfile(tempName, tempPosition, tempBranch);
-    }
-    setIsEditing(false);
-  };
-
   const handlePrint = () => {
     window.print();
   };
 
   const handleShare = () => {
-    const shareText = `Official Training Certificate: ${tempName} (${tempPosition}) passed the ${quizTitle} with a score of ${score}/${totalQuestions} on ${dateTimeStr}. Verified by Imperial Kitchen Group L&D Team. Certificate Serial: ${certSerial}`;
+    const shareText = `Official Training Certificate: ${lockedName} (${lockedPosition}) passed the ${quizTitle} with a score of ${score}/${totalQuestions} on ${dateTimeStr}. Verified by Imperial Kitchen Group L&D Team. Certificate Serial: ${certSerial}`;
     if (navigator.clipboard) {
       navigator.clipboard.writeText(shareText);
       setCopyStatus('Certificate details copied to clipboard!');
@@ -145,26 +129,23 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
               <Award className="w-5 h-5" />
             </span>
             <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
+              <h2 className="text-sm font-bold text-white flex items-center gap-1.5 flex-wrap">
                 <span>System-Generated Training Certificate</span>
                 <span className="px-2 py-0.2 rounded-full text-[10px] font-extrabold bg-emerald-950 text-emerald-300 border border-emerald-700/50">
                   Verified Passing Score
                 </span>
+                <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-amber-950/90 text-amber-300 border border-amber-700/60 flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5 text-amber-400" />
+                  <span>Sign-In Identity Locked (Master Hub Controlled)</span>
+                </span>
               </h2>
               <p className="text-[11px] text-slate-400">
-                Official credential certified and digitally signed by the L&D Team
+                Issued strictly to the Name &amp; Position recorded on your approved Sign-In Account
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setIsEditing(!isEditing)}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 transition-colors"
-            >
-              <User className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">{isEditing ? 'Cancel Edit' : 'Edit Details'}</span>
-            </button>
             <button
               onClick={handlePrint}
               className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 transition-all"
@@ -194,54 +175,6 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
         {copyStatus && (
           <div className="no-print bg-emerald-900/90 text-emerald-200 text-xs text-center py-1.5 px-4 font-semibold border-b border-emerald-700 animate-fadeIn">
             {copyStatus}
-          </div>
-        )}
-
-        {/* Optional Edit Bar */}
-        {isEditing && (
-          <div className="no-print bg-slate-800/90 border-b border-slate-700 p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-3 gap-2.5 flex-shrink-0 animate-in slide-in-from-top-2 duration-150">
-            <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
-                Employee Full Name
-              </label>
-              <input
-                type="text"
-                value={tempName}
-                onChange={(e) => setTempName(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-red-500"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
-                Official Position / Designation
-              </label>
-              <input
-                type="text"
-                value={tempPosition}
-                onChange={(e) => setTempPosition(e.target.value)}
-                placeholder="e.g. Kitchen Shift Lead / Hotpot Specialist"
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-red-500"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
-                Branch / Store Location
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={tempBranch}
-                  onChange={(e) => setTempBranch(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-red-500"
-                />
-                <button
-                  onClick={handleSaveProfile}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs whitespace-nowrap"
-                >
-                  Save
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
@@ -301,21 +234,21 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
                 This official credential is system-generated and proudly presented to:
               </p>
 
-              {/* Employee Full Name */}
+              {/* Employee Full Name (Locked to Sign-In Account) */}
               <div className="py-1">
                 <div className="text-2xl sm:text-4xl font-extrabold text-[#7f1d1d] tracking-tight uppercase border-b-2 border-[#b45309]/40 pb-1 max-w-lg mx-auto font-serif">
-                  {tempName || 'Staff Member'}
+                  {lockedName}
                 </div>
               </div>
 
-              {/* Position and Branch */}
+              {/* Position and Branch (Locked to Sign-In Account) */}
               <div className="space-y-0.5">
                 <p className="text-sm sm:text-base font-bold text-slate-800 flex items-center justify-center gap-1.5">
                   <Briefcase className="w-4 h-4 text-[#b45309]" />
-                  <span>{tempPosition || 'Position Not Specified'}</span>
+                  <span>{lockedPosition}</span>
                 </p>
                 <p className="text-xs text-slate-600 font-medium">
-                  {tempBranch || 'Jiangnan Hotpot'}
+                  {lockedBranch}
                 </p>
               </div>
 

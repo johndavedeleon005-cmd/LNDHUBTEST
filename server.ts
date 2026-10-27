@@ -575,33 +575,47 @@ app.get('/api/auth/accounts', (_req, res) => {
   });
 });
 
-// 6. Master Account Approve / Reject / Update Role (Also upserts if account only existed in Firestore/client)
-app.post('/api/auth/approve', (req, res) => {
-  const { targetUid, targetEmail, targetUser, status, role } = req.body || {};
-  const cleanEmail = String(targetEmail || targetUser?.email || '').trim().toLowerCase();
+// 6. Master Account Approve / Reject / Update Role & Profile (Name, Position, Branch)
+const handleMasterAccountUpdate = (req: express.Request, res: express.Response) => {
+  const {
+    targetUid,
+    targetEmail,
+    email,
+    displayName,
+    position,
+    branch,
+    ndaSignature,
+    targetUser,
+    status,
+    role,
+  } = req.body || {};
+  const cleanEmail = String(targetEmail || email || targetUser?.email || '').trim().toLowerCase();
   let acc = portalStore.accounts.find(
     (a: any) =>
       a.uid === targetUid ||
       (cleanEmail && a.email.toLowerCase() === cleanEmail)
   );
 
-  if (!acc && targetUser && targetUser.email) {
+  if (!acc && (cleanEmail || (targetUser && targetUser.email))) {
     const nowIso = new Date().toISOString();
     acc = {
-      uid: targetUid || targetUser.uid || `user-${cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, '-')}`,
+      uid:
+        targetUid ||
+        targetUser?.uid ||
+        `user-${cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, '-')}`,
       email: cleanEmail,
-      password: targetUser.password || 'Staff2026!',
-      displayName: targetUser.displayName || cleanEmail,
-      position: targetUser.position || 'Restaurant Staff',
-      branch: targetUser.branch || 'Jiangnan Hotpot - SM Mall of Asia',
-      role: role || targetUser.role || 'staff',
-      status: status || targetUser.status || 'approved',
+      password: targetUser?.password || 'Staff2026!',
+      displayName: displayName || targetUser?.displayName || cleanEmail,
+      position: position || targetUser?.position || 'Restaurant Staff',
+      branch: branch || targetUser?.branch || 'Jiangnan Hotpot - SM Mall of Asia',
+      role: role || targetUser?.role || 'staff',
+      status: status || targetUser?.status || 'approved',
       ndaAccepted: true,
-      ndaSignature: targetUser.ndaSignature || 'I AGREE',
-      ndaAcceptedAt: targetUser.ndaAcceptedAt || nowIso,
-      createdAt: targetUser.createdAt || nowIso,
+      ndaSignature: ndaSignature || targetUser?.ndaSignature || 'I AGREE',
+      ndaAcceptedAt: targetUser?.ndaAcceptedAt || nowIso,
+      createdAt: targetUser?.createdAt || nowIso,
       updatedAt: nowIso,
-      authProvider: targetUser.authProvider || 'staff_credentials',
+      authProvider: targetUser?.authProvider || 'staff_credentials',
     };
     portalStore.accounts.push(acc);
   }
@@ -610,6 +624,15 @@ app.post('/api/auth/approve', (req, res) => {
     return res.status(404).json({ error: 'Target account not found.' });
   }
 
+  if (typeof displayName === 'string' && displayName.trim()) {
+    acc.displayName = displayName.trim().slice(0, 120);
+  }
+  if (typeof position === 'string' && position.trim()) {
+    acc.position = position.trim().slice(0, 120);
+  }
+  if (typeof branch === 'string' && branch.trim()) {
+    acc.branch = branch.trim().slice(0, 160);
+  }
   if (status && ['pending', 'approved', 'rejected'].includes(status)) {
     acc.status = status;
   }
@@ -623,7 +646,10 @@ app.post('/api/auth/approve', (req, res) => {
     user: sanitizeAccount(acc),
     accounts: portalStore.accounts.map(sanitizeAccount),
   });
-});
+};
+
+app.post('/api/auth/approve', handleMasterAccountUpdate);
+app.post('/api/auth/update-profile', handleMasterAccountUpdate);
 
 // 7. Delete Account (Master Account only)
 app.delete('/api/auth/accounts/:uid', (req, res) => {

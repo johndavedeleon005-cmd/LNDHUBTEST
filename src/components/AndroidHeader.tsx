@@ -301,24 +301,24 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
             <button
               onClick={onOpenAuthModal}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-all cursor-pointer"
-              title={`Signed in as ${currentUser.displayName} (${currentUser.email}) — Click to Switch Account or Sign In`}
+              title={`Signed in as ${currentUser.displayName} (${currentUser.position}) — Click to Log In / Switch Account`}
             >
               <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="max-w-[90px] truncate hidden sm:inline">
+              <span className="max-w-[100px] truncate hidden sm:inline">
                 {currentUser.displayName.split(' ')[0]}
               </span>
-              <span className="sm:hidden">Account</span>
+              <span className="sm:hidden">Log In</span>
             </button>
           )}
 
           {currentUser && onSignOut ? (
             <button
               onClick={onSignOut}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-red-950/70 hover:bg-red-900 border border-red-800/60 text-red-200 text-xs font-bold transition-all cursor-pointer"
-              title={`Sign out (${currentUser.email})`}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-red-950/80 hover:bg-red-900 border border-red-700/70 text-red-200 text-xs font-bold transition-all cursor-pointer"
+              title={`Log out (${currentUser.email})`}
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Sign Out</span>
+              <span>Log Out</span>
             </button>
           ) : (
             onOpenAuthModal && (
@@ -326,7 +326,7 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
                 onClick={onOpenAuthModal}
                 className="px-2.5 py-1.5 rounded-full bg-amber-500 text-slate-950 text-xs font-black cursor-pointer"
               >
-                Sign In
+                Log In
               </button>
             )
           )}

@@ -895,6 +895,124 @@ export async function updateAccountApprovalStatus(
   return fetchAllPortalAccounts();
 }
 
+export async function updateStaffProfileByMaster(
+  targetUser: PortalUser,
+  updates: {
+    displayName: string;
+    position: string;
+    branch: string;
+    status?: 'pending' | 'approved' | 'rejected';
+    role?: 'master' | 'staff';
+  }
+): Promise<PortalUser[]> {
+  const cleanName = (updates.displayName || targetUser.displayName).trim().slice(0, 120);
+  const cleanPosition = (updates.position || targetUser.position).trim().slice(0, 120);
+  const cleanBranch = (updates.branch || targetUser.branch).trim().slice(0, 160);
+  const nextStatus = updates.status || targetUser.status;
+  const nextRole = updates.role || targetUser.role;
+  const nowIso = new Date().toISOString();
+
+  const updatedAccount: PortalUser = {
+    ...targetUser,
+    displayName: cleanName,
+    position: cleanPosition,
+    branch: cleanBranch,
+    status: nextStatus,
+    role: nextRole,
+    updatedAt: nowIso,
+  };
+
+  // 1. Update local accounts list
+  const localAccs = getLocalAccounts();
+  let foundLocal = false;
+  const updatedLocal = localAccs.map((a) => {
+    if (
+      a.uid === targetUser.uid ||
+      a.email.toLowerCase() === targetUser.email.toLowerCase()
+    ) {
+      foundLocal = true;
+      return {
+        ...a,
+        displayName: cleanName,
+        position: cleanPosition,
+        branch: cleanBranch,
+        status: nextStatus,
+        role: nextRole,
+        updatedAt: nowIso,
+      };
+    }
+    return a;
+  });
+  if (!foundLocal) {
+    updatedLocal.push(updatedAccount);
+  }
+  saveLocalAccounts(updatedLocal);
+
+  // If the currently signed-in session matches this user, update their session immediately
+  const activeSession = getSavedSessionUser();
+  if (
+    activeSession &&
+    (activeSession.uid === targetUser.uid ||
+      activeSession.email.toLowerCase() === targetUser.email.toLowerCase())
+  ) {
+    saveSessionUser({
+      ...activeSession,
+      displayName: cleanName,
+      position: cleanPosition,
+      branch: cleanBranch,
+      status: nextStatus,
+      role: nextRole,
+      updatedAt: nowIso,
+    });
+  }
+
+  // 2. Update Firebase Firestore /users/{uid}
+  const detUid = toDeterministicUid(targetUser.email);
+  const candidateIds = Array.from(new Set([targetUser.uid, detUid].filter(Boolean)));
+  for (const cid of candidateIds) {
+    try {
+      await setDoc(
+        doc(db, 'users', cid),
+        {
+          displayName: cleanName,
+          position: cleanPosition,
+          branch: cleanBranch,
+          status: nextStatus,
+          role: nextRole,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch {
+      // Fallback to full syncAccountToFirestore if document didn't exist yet
+      await syncAccountToFirestore(updatedAccount);
+    }
+  }
+
+  // 3. Update Express backend
+  try {
+    await apiFetch('/api/auth/update-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUid: targetUser.uid,
+        email: targetUser.email,
+        displayName: cleanName,
+        position: cleanPosition,
+        branch: cleanBranch,
+        ndaSignature: targetUser.ndaSignature || 'I AGREE',
+        status: nextStatus,
+        role: nextRole,
+      }),
+    });
+  } catch {
+    // ignore
+  }
+
+  broadcastAccountSync();
+  return fetchAllPortalAccounts();
+}
+
 export async function checkCurrentAccountStatus(user: PortalUser): Promise<PortalUser> {
   const cleanEmail = user.email.trim().toLowerCase();
   const detUid = toDeterministicUid(cleanEmail);
@@ -909,6 +1027,9 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
         const resolved: PortalUser = {
           ...user,
           uid: d.uid || cid,
+          displayName: d.displayName || user.displayName,
+          position: d.position || user.position,
+          branch: d.branch || user.branch,
           role: d.role === 'master' ? 'master' : 'staff',
           status:
             d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending',

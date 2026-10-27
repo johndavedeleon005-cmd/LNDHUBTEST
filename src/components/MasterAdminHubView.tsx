@@ -20,6 +20,9 @@ import {
   FolderUp,
   Layers,
   AlertCircle,
+  Pencil,
+  Save,
+  X,
 } from 'lucide-react';
 import {
   PortalUser,
@@ -32,6 +35,7 @@ import {
   fetchAllPortalAccounts,
   subscribeToPortalAccounts,
   updateAccountApprovalStatus,
+  updateStaffProfileByMaster,
   registerStaffAccount,
   parseDocumentWithAI,
   publishCustomDocument,
@@ -47,6 +51,7 @@ interface MasterAdminHubViewProps {
   onLaunchGameWithDoc: (mode: 'receptionist' | 'hazard', doc: FoodSafetyDoc) => void;
   onLaunchAIWithDoc: (doc: FoodSafetyDoc) => void;
   onAccountsChanged?: (pendingCount: number) => void;
+  onAccountProfileUpdated?: (updatedAccount: PortalUser) => void;
 }
 
 const SAMPLE_UPLOAD_TEMPLATES: {
@@ -133,6 +138,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   onLaunchGameWithDoc,
   onLaunchAIWithDoc,
   onAccountsChanged,
+  onAccountProfileUpdated,
 }) => {
   const [activeSection, setActiveSection] = useState<'approvals' | 'uploader' | 'credentials'>('approvals');
 
@@ -140,6 +146,14 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   const [accounts, setAccounts] = useState<PortalUser[]>([]);
   const [accountFilter, setAccountFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [loadingAccounts, setLoadingAccounts] = useState(false);
+
+  // Master Edit Staff Name / Position / Branch state
+  const [editingAccountUid, setEditingAccountUid] = useState<string | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [editPosition, setEditPosition] = useState('');
+  const [editBranch, setEditBranch] = useState('');
+  const [savingProfileUid, setSavingProfileUid] = useState<string | null>(null);
+  const [savedProfileMessage, setSavedProfileMessage] = useState<string | null>(null);
 
   // Quick Add Staff by Master state
   const [newStaffName, setNewStaffName] = useState('');
@@ -205,6 +219,47 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
     setAccounts(updated);
     if (onAccountsChanged) {
       onAccountsChanged(updated.filter((a) => a.status === 'pending').length);
+    }
+  };
+
+  const handleStartEditProfile = (acc: PortalUser) => {
+    setEditingAccountUid(acc.uid);
+    setEditDisplayName(acc.displayName || '');
+    setEditPosition(acc.position || '');
+    setEditBranch(acc.branch || '');
+    setSavedProfileMessage(null);
+  };
+
+  const handleCancelEditProfile = () => {
+    setEditingAccountUid(null);
+    setEditDisplayName('');
+    setEditPosition('');
+    setEditBranch('');
+  };
+
+  const handleSaveEditedProfile = async (acc: PortalUser) => {
+    if (!editDisplayName.trim() || !editPosition.trim()) return;
+    setSavingProfileUid(acc.uid);
+    try {
+      const updatedList = await updateStaffProfileByMaster(acc, {
+        displayName: editDisplayName.trim(),
+        position: editPosition.trim(),
+        branch: editBranch.trim() || acc.branch,
+      });
+      setAccounts(updatedList);
+      const matchedUpdated = updatedList.find(
+        (u) => u.uid === acc.uid || u.email.toLowerCase() === acc.email.toLowerCase()
+      );
+      if (matchedUpdated && onAccountProfileUpdated) {
+        onAccountProfileUpdated(matchedUpdated);
+      }
+      setEditingAccountUid(null);
+      setSavedProfileMessage(
+        `Updated certificate identity for ${editDisplayName.trim()} (${editPosition.trim()})`
+      );
+      setTimeout(() => setSavedProfileMessage(null), 4000);
+    } finally {
+      setSavingProfileUid(null);
     }
   };
 
@@ -924,12 +979,20 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
             ))}
           </div>
 
-          {/* Accounts List with Confidentiality Agreement Status Beside Every Name */}
+          {savedProfileMessage && (
+            <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/60 text-xs font-bold text-emerald-200 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{savedProfileMessage}</span>
+            </div>
+          )}
+
+          {/* Accounts List with Confidentiality Agreement Status & Master Name/Position Editor */}
           <div className="space-y-2.5">
             {filteredAccounts.map((acc) => {
               const isMaster = acc.role === 'master';
               const ndaAccepted = acc.ndaAccepted !== false;
               const ndaSig = acc.ndaSignature || 'I AGREE';
+              const isEditingThis = editingAccountUid === acc.uid;
               const ndaDateFormatted = acc.ndaAcceptedAt || acc.createdAt
                 ? new Date(acc.ndaAcceptedAt || acc.createdAt).toLocaleDateString('en-US', {
                     month: 'short',
@@ -941,84 +1004,186 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
               return (
                 <div
                   key={acc.uid}
-                  className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                  className={`p-3.5 rounded-2xl border space-y-3 ${
                     acc.status === 'pending'
                       ? 'bg-amber-950/20 border-amber-500/50'
                       : 'bg-slate-950 border-slate-800'
                   }`}
                 >
-                  <div className="space-y-1.5 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-bold text-white">{acc.displayName}</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-bold text-white">{acc.displayName}</span>
 
-                      {/* Confidentiality Agreement Acceptance Indicator Beside Name */}
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border ${
-                          ndaAccepted
-                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/60'
-                            : 'bg-red-950/80 text-red-300 border-red-700/60'
-                        }`}
-                        title={`Confidentiality Agreement signed with "${ndaSig}" on ${ndaDateFormatted}`}
-                      >
-                        <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-                        <span>
-                          Confidentiality Agreement: Accepted (&quot;{ndaSig}&quot;) · {ndaDateFormatted}
+                        {/* Confidentiality Agreement Acceptance Indicator Beside Name */}
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border ${
+                            ndaAccepted
+                              ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/60'
+                              : 'bg-red-950/80 text-red-300 border-red-700/60'
+                          }`}
+                          title={`Confidentiality Agreement signed with "${ndaSig}" on ${ndaDateFormatted}`}
+                        >
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                          <span>
+                            Confidentiality Agreement: Accepted (&quot;{ndaSig}&quot;) · {ndaDateFormatted}
+                          </span>
                         </span>
-                      </span>
 
-                      <span
-                        className={`text-[11px] font-mono font-bold uppercase ${
-                          isMaster
-                            ? 'text-amber-300'
-                            : acc.status === 'approved'
-                            ? 'text-emerald-400'
-                            : acc.status === 'pending'
-                            ? 'text-amber-400'
-                            : 'text-red-400'
-                        }`}
-                      >
-                        [{isMaster ? 'MASTER ACCOUNT' : acc.status}]
-                      </span>
+                        <span
+                          className={`text-[11px] font-mono font-bold uppercase ${
+                            isMaster
+                              ? 'text-amber-300'
+                              : acc.status === 'approved'
+                              ? 'text-emerald-400'
+                              : acc.status === 'pending'
+                              ? 'text-amber-400'
+                              : 'text-red-400'
+                          }`}
+                        >
+                          [{isMaster ? 'MASTER ACCOUNT' : acc.status}]
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-slate-300">{acc.email}</span>
+                        <span>·</span>
+                        <span className="text-amber-300 font-semibold">{acc.position}</span>
+                        <span>·</span>
+                        <span>{acc.branch}</span>
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-slate-300">{acc.email}</span>
-                      <span>·</span>
-                      <span>{acc.position}</span>
-                      <span>·</span>
-                      <span>{acc.branch}</span>
+
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          isEditingThis ? handleCancelEditProfile() : handleStartEditProfile(acc)
+                        }
+                        className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer border transition-colors ${
+                          isEditingThis
+                            ? 'bg-slate-800 text-slate-200 border-slate-600'
+                            : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40'
+                        }`}
+                        title="Master Account Only: Edit Employee Name, Position & Branch for Certificates"
+                      >
+                        <Pencil className="w-3.5 h-3.5 text-amber-400" />
+                        <span>{isEditingThis ? 'Cancel Edit' : 'Edit Name & Position'}</span>
+                      </button>
+
+                      {!isMaster && (
+                        <>
+                          {acc.status !== 'approved' && (
+                            <button
+                              onClick={() => handleApprovalAction(acc, 'approved')}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1 cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Approve Account</span>
+                            </button>
+                          )}
+
+                          {acc.status !== 'rejected' && (
+                            <button
+                              onClick={() => handleApprovalAction(acc, 'rejected')}
+                              className="px-3 py-1.5 rounded-xl bg-red-950 hover:bg-red-900 text-red-200 border border-red-800/60 font-semibold text-xs flex items-center gap-1 cursor-pointer"
+                            >
+                              <UserX className="w-3.5 h-3.5" />
+                              <span>{acc.status === 'pending' ? 'Decline' : 'Revoke Access'}</span>
+                            </button>
+                          )}
+
+                          {acc.status === 'approved' && (
+                            <button
+                              onClick={() => handleApprovalAction(acc, 'approved', 'master')}
+                              className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 text-[11px] font-semibold cursor-pointer"
+                            >
+                              Promote to Master
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
 
-                  {!isMaster && (
-                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                      {acc.status !== 'approved' && (
-                        <button
-                          onClick={() => handleApprovalAction(acc, 'approved')}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1 cursor-pointer"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Approve Account</span>
-                        </button>
-                      )}
+                  {/* Inline Master Account Profile Editor (Name, Position, Branch for Certificates) */}
+                  {isEditingThis && (
+                    <div className="p-3.5 rounded-xl bg-slate-900/95 border border-amber-500/50 space-y-3">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                          <Pencil className="w-3.5 h-3.5 text-amber-400" />
+                          <span>
+                            Master Override: Edit Certificate Name, Position &amp; Branch for {acc.email}
+                          </span>
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          Changes sync to all Training Certificates immediately
+                        </span>
+                      </div>
 
-                      {acc.status !== 'rejected' && (
-                        <button
-                          onClick={() => handleApprovalAction(acc, 'rejected')}
-                          className="px-3 py-1.5 rounded-xl bg-red-950 hover:bg-red-900 text-red-200 border border-red-800/60 font-semibold text-xs flex items-center gap-1 cursor-pointer"
-                        >
-                          <UserX className="w-3.5 h-3.5" />
-                          <span>{acc.status === 'pending' ? 'Decline' : 'Revoke Access'}</span>
-                        </button>
-                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
+                            Employee Full Name (Certificate Name)
+                          </label>
+                          <input
+                            type="text"
+                            value={editDisplayName}
+                            onChange={(e) => setEditDisplayName(e.target.value)}
+                            placeholder="Employee Full Name"
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
 
-                      {acc.status === 'approved' && (
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
+                            Official Position / Designation
+                          </label>
+                          <input
+                            type="text"
+                            value={editPosition}
+                            onChange={(e) => setEditPosition(e.target.value)}
+                            placeholder="e.g. FOH Receptionist / Kitchen Shift Lead"
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
+                            Branch / Store Location
+                          </label>
+                          <input
+                            type="text"
+                            value={editBranch}
+                            onChange={(e) => setEditBranch(e.target.value)}
+                            placeholder="e.g. Jiangnan Hotpot - SM Mall of Asia"
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => handleApprovalAction(acc, 'approved', 'master')}
-                          className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 text-[11px] font-semibold cursor-pointer"
+                          type="button"
+                          onClick={handleCancelEditProfile}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
                         >
-                          Promote to Master
+                          <X className="w-3.5 h-3.5" />
+                          <span>Cancel</span>
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEditedProfile(acc)}
+                          disabled={savingProfileUid === acc.uid}
+                          className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>
+                            {savingProfileUid === acc.uid
+                              ? 'Saving Profile...'
+                              : 'Save Certificate Name & Position'}
+                          </span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1036,7 +1201,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                 </span>
               </h4>
               <span className="text-[11px] font-mono text-slate-400">
-                Verification Method: Manual Typing of &quot;I AGREE&quot;
+                Verification Method: Manual Typing of &quot;I AGREE&quot; · Name &amp; Position Editable by Master
               </span>
             </div>
 
@@ -1044,12 +1209,12 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 bg-slate-900/80 text-[10px] font-mono uppercase text-slate-400">
-                    <th className="py-2.5 px-3">Staff Name</th>
+                    <th className="py-2.5 px-3">Staff Name (Certificate)</th>
                     <th className="py-2.5 px-3">Confidentiality Agreement Status</th>
                     <th className="py-2.5 px-3">Typed Confirmation</th>
                     <th className="py-2.5 px-3">Position &amp; Branch</th>
                     <th className="py-2.5 px-3">Date Accepted</th>
-                    <th className="py-2.5 px-3">Portal Access</th>
+                    <th className="py-2.5 px-3">Master Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/70">
@@ -1073,7 +1238,8 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                           &quot;{acc.ndaSignature || 'I AGREE'}&quot;
                         </td>
                         <td className="py-2.5 px-3 text-slate-300">
-                          {acc.position} · <span className="text-slate-400">{acc.branch}</span>
+                          <span className="font-semibold text-amber-300">{acc.position}</span> ·{' '}
+                          <span className="text-slate-400">{acc.branch}</span>
                         </td>
                         <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400 whitespace-nowrap">
                           {ndaDate
@@ -1085,19 +1251,29 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                             : 'Verified'}
                         </td>
                         <td className="py-2.5 px-3 whitespace-nowrap">
-                          <span
-                            className={`font-mono text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                              acc.role === 'master'
-                                ? 'bg-amber-950 text-amber-300 border border-amber-700'
-                                : acc.status === 'approved'
-                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
-                                : acc.status === 'pending'
-                                ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
-                                : 'bg-red-950 text-red-300 border border-red-800'
-                            }`}
-                          >
-                            {acc.role === 'master' ? 'MASTER' : acc.status}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`font-mono text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                                acc.role === 'master'
+                                  ? 'bg-amber-950 text-amber-300 border border-amber-700'
+                                  : acc.status === 'approved'
+                                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                                  : acc.status === 'pending'
+                                  ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                                  : 'bg-red-950 text-red-300 border border-red-800'
+                              }`}
+                            >
+                              {acc.role === 'master' ? 'MASTER' : acc.status}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditProfile(acc)}
+                              className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Pencil className="w-2.5 h-2.5" />
+                              <span>Edit Name/Pos</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

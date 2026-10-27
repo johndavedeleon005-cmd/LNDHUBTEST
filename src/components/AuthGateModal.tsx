@@ -431,11 +431,11 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
               {/* Animated L&D Badge */}
               <div
                 onClick={() => setIsAboutLndModalOpen(true)}
-                className="w-12 h-12 rounded-2xl overflow-hidden bg-white border-2 border-amber-500/60 shadow-md shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                className="w-12 h-12 rounded-2xl overflow-hidden bg-black border-2 border-amber-500/60 shadow-md shrink-0 cursor-pointer hover:scale-105 transition-transform"
                 title="Click to view About the L&D Team & Mission"
               >
                 <video
-                  src="./assets/aistudio/ANIMATED_LND_LOGO_9bad3066.mp4"
+                  src="./assets/aistudio/NEW_LOGO_ANIMATION_e69a8263.mp4"
                   autoPlay
                   loop
                   muted
@@ -1096,9 +1096,9 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
             <div className="p-5 sm:p-6 overflow-y-auto space-y-5 text-slate-200 text-sm leading-relaxed">
               {/* Animated L&D Logo Video */}
               <div className="flex flex-col items-center justify-center">
-                <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden bg-white shadow-xl border-2 border-amber-500/50 ring-4 ring-red-900/30 flex items-center justify-center">
+                <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden bg-black shadow-xl border-2 border-amber-500/50 ring-4 ring-red-900/30 flex items-center justify-center">
                   <video
-                    src="./assets/aistudio/ANIMATED_LND_LOGO_9bad3066.mp4"
+                    src="./assets/aistudio/NEW_LOGO_ANIMATION_e69a8263.mp4"
                     autoPlay
                     loop
                     muted
