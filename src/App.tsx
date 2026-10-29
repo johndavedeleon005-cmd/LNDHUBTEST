@@ -58,6 +58,7 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
   const [pendingAccountsList, setPendingAccountsList] = useState<PortalUser[]>([]);
+  const [initialCertVerifyCode, setInitialCertVerifyCode] = useState<string | null>(null);
 
   // Documents state (persisted with any custom added docs)
   const [documents, setDocuments] = useState<FoodSafetyDoc[]>(() => {
@@ -1135,12 +1136,18 @@ export default function App() {
                   documents={documents}
                   readDocIds={readDocIds}
                   staffName={staffName}
+                  staffEmail={currentUser?.email}
                   staffPosition={staffPosition}
                   staffBranch={staffBranch}
                   onOpenDoc={(d) => handleInitiateViewDoc(d)}
                   onOpenWelcomeModal={() => setIsWelcomeOpen(true)}
                   isMasterAccount={currentUser?.role === 'master'}
-                  onOpenMasterHub={() => setActiveTab('master')}
+                  onOpenMasterHub={(serialCode) => {
+                    if (serialCode) {
+                      setInitialCertVerifyCode(serialCode);
+                    }
+                    setActiveTab('master');
+                  }}
                 />
               )}
 
@@ -1163,6 +1170,8 @@ export default function App() {
                   documents={documents}
                   onAddOrUpdateCustomDoc={handleDocumentUploaded}
                   onDeleteCustomDoc={handleDocumentDeleted}
+                  initialCertVerifyCode={initialCertVerifyCode}
+                  onClearInitialCertVerifyCode={() => setInitialCertVerifyCode(null)}
                   onOpenDoc={(d) => handleInitiateViewDoc(d)}
                   onLaunchGameWithDoc={(mode, doc) => {
                     setFocusedGameDoc(doc);

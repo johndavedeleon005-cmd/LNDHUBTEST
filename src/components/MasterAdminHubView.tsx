@@ -49,6 +49,9 @@ import {
   subscribeToIssuedCertificates,
   updateCertificateStatusByMaster,
   issueOrUpdateTrainingCertificate,
+  verifyTrainingCertificateByCode,
+  findMatchingCertificateInList,
+  extractCleanCertQuery,
 } from '../services/authAndUploadService';
 import { TrainingCertificateModal } from './TrainingCertificateModal';
 
@@ -62,6 +65,8 @@ interface MasterAdminHubViewProps {
   onLaunchAIWithDoc: (doc: FoodSafetyDoc) => void;
   onAccountsChanged?: (pendingCount: number) => void;
   onAccountProfileUpdated?: (updatedAccount: PortalUser) => void;
+  initialCertVerifyCode?: string | null;
+  onClearInitialCertVerifyCode?: () => void;
 }
 
 const SAMPLE_UPLOAD_TEMPLATES: {
@@ -149,6 +154,8 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   onLaunchAIWithDoc,
   onAccountsChanged,
   onAccountProfileUpdated,
+  initialCertVerifyCode,
+  onClearInitialCertVerifyCode,
 }) => {
   const [activeSection, setActiveSection] = useState<
     'approvals' | 'uploader' | 'certificates' | 'credentials'
@@ -178,6 +185,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   // Certificate Verification & Single-Certificate Registry state
   const [certificates, setCertificates] = useState<TrainingCertificateRecord[]>([]);
   const [loadingCertificates, setLoadingCertificates] = useState(false);
+  const [isVerifyingCert, setIsVerifyingCert] = useState(false);
   const [certSearchQuery, setCertSearchQuery] = useState('');
   const [verifiedLookupResult, setVerifiedLookupResult] = useState<TrainingCertificateRecord | null>(null);
   const [certLookupAttempted, setCertLookupAttempted] = useState(false);
@@ -243,28 +251,51 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
     return () => unsubCerts();
   }, []);
 
-  const handleVerifyCertificateQuery = (e?: React.FormEvent, customCode?: string) => {
+  const handleVerifyCertificateQuery = async (e?: React.FormEvent, customCode?: string) => {
     if (e) e.preventDefault();
-    const q = (customCode !== undefined ? customCode : certSearchQuery).trim().toLowerCase();
-    if (!q) {
+    const raw = (customCode !== undefined ? customCode : certSearchQuery).trim();
+    const cleaned = extractCleanCertQuery(raw);
+    if (!cleaned) {
       setCertLookupAttempted(false);
       setVerifiedLookupResult(null);
       return;
     }
-    setCertLookupAttempted(true);
-    const exactOrPartial =
-      certificates.find((c) => c.serialCode.toLowerCase() === q) ||
-      certificates.find((c) => c.staffEmail.toLowerCase() === q) ||
-      certificates.find((c) => c.staffName.toLowerCase() === q) ||
-      certificates.find(
-        (c) =>
-          c.serialCode.toLowerCase().includes(q) ||
-          c.staffName.toLowerCase().includes(q) ||
-          c.staffEmail.toLowerCase().includes(q)
-      ) ||
-      null;
-    setVerifiedLookupResult(exactOrPartial);
+
+    // Normalize input box if user pasted share text with a serial code inside
+    if (customCode === undefined && cleaned.startsWith('IKG-LD-') && raw !== cleaned) {
+      setCertSearchQuery(cleaned);
+    }
+
+    // 1. Instant synchronous check against loaded certificates & accounts
+    const immediateHit = findMatchingCertificateInList(cleaned, certificates, accounts);
+    if (immediateHit) {
+      setVerifiedLookupResult(immediateHit);
+      setCertLookupAttempted(true);
+    }
+
+    // 2. Full cross-store verification (Express + Firestore + LocalStorage + Account Self-Healing)
+    setIsVerifyingCert(true);
+    try {
+      const { certificate, allCertificates } = await verifyTrainingCertificateByCode(cleaned);
+      setCertificates(allCertificates);
+      setVerifiedLookupResult(certificate || immediateHit || null);
+      setCertLookupAttempted(true);
+    } finally {
+      setIsVerifyingCert(false);
+    }
   };
+
+  useEffect(() => {
+    if (initialCertVerifyCode && initialCertVerifyCode.trim()) {
+      const code = extractCleanCertQuery(initialCertVerifyCode);
+      setActiveSection('certificates');
+      setCertSearchQuery(code);
+      handleVerifyCertificateQuery(undefined, code);
+      if (onClearInitialCertVerifyCode) {
+        onClearInitialCertVerifyCode();
+      }
+    }
+  }, [initialCertVerifyCode]);
 
   const handleToggleCertificateStatus = async (
     cert: TrainingCertificateRecord,
@@ -642,8 +673,28 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                   type="text"
                   value={certSearchQuery}
                   onChange={(e) => {
-                    setCertSearchQuery(e.target.value);
-                    if (!e.target.value.trim()) {
+                    const val = e.target.value;
+                    setCertSearchQuery(val);
+                    if (!val.trim()) {
+                      setCertLookupAttempted(false);
+                      setVerifiedLookupResult(null);
+                      return;
+                    }
+                    const cleaned = extractCleanCertQuery(val);
+                    const liveMatch = findMatchingCertificateInList(
+                      cleaned,
+                      certificates,
+                      accounts
+                    );
+                    if (liveMatch && cleaned.length >= 3) {
+                      setVerifiedLookupResult(liveMatch);
+                      setCertLookupAttempted(true);
+                      if (/^IKG-LD-/i.test(cleaned)) {
+                        handleVerifyCertificateQuery(undefined, cleaned);
+                      }
+                    } else if (/^IKG-LD-\d{4}-[A-Z0-9]{6,}/i.test(cleaned)) {
+                      handleVerifyCertificateQuery(undefined, cleaned);
+                    } else {
                       setCertLookupAttempted(false);
                       setVerifiedLookupResult(null);
                     }
@@ -668,10 +719,11 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
 
               <button
                 type="submit"
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer shrink-0"
+                disabled={isVerifyingCert}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 disabled:opacity-60 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer shrink-0"
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>Verify Certificate</span>
+                <span>{isVerifyingCert ? 'Verifying Code...' : 'Verify Certificate'}</span>
               </button>
             </form>
 

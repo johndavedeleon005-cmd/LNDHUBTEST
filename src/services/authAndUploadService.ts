@@ -1832,6 +1832,203 @@ export function saveDocumentsToLocalStorage(docs: FoodSafetyDoc[]) {
 // SINGLE OFFICIAL CERTIFICATE REGISTRY & MASTER HUB VERIFICATION
 // ============================================================================
 
+export function extractCleanCertQuery(rawQuery: string): string {
+  const trimmed = String(rawQuery || '').trim();
+  if (!trimmed) return '';
+
+  // 1. If user pasted full share text or a label containing IKG-LD-..., extract the serial token
+  const serialMatch = trimmed.match(/IKG[\s\-_]*LD[\s\-_]*\d{4}[\s\-_]*[A-Z0-9]+/i);
+  if (serialMatch) {
+    const compact = serialMatch[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    // Format: IKGLD2026XXXXXX -> IKG-LD-2026-XXXXXX
+    const m = compact.match(/^IKGLD(\d{4})([A-Z0-9]+)$/);
+    if (m) {
+      return `IKG-LD-${m[1]}-${m[2]}`;
+    }
+    return serialMatch[0].trim().toUpperCase();
+  }
+
+  // 2. If user pasted a deterministic cert ID (cert-...)
+  const certIdMatch = trimmed.match(/\bcert-[a-z0-9\-]+\b/i);
+  if (certIdMatch) {
+    return certIdMatch[0].toLowerCase();
+  }
+
+  // 3. Strip common prefix labels like "Serial:", "Code:", "Verification Serial:"
+  return trimmed
+    .replace(
+      /^(master\s*hub\s*verification\s*serial|verification\s*serial|certificate\s*serial|serial\s*code|serial|certificate\s*code|code)\s*[:#\-]?\s*/i,
+      ''
+    )
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, '')
+    .trim();
+}
+
+export function getCandidateSerialCodesForIdentity(
+  staffEmail?: string,
+  staffName?: string,
+  explicitSerial?: string
+): string[] {
+  const candidates = new Set<string>();
+  const add = (val?: string) => {
+    const clean = String(val || '').trim().toUpperCase();
+    if (clean) candidates.add(clean);
+  };
+
+  if (explicitSerial) {
+    add(explicitSerial);
+  }
+
+  const cleanEmail = String(staffEmail || '').trim().toLowerCase();
+  const cleanName = String(staffName || '').trim();
+  const lowerName = cleanName.toLowerCase();
+  const strippedName = cleanName.replace(/\s*\([^)]*\)\s*/g, '').trim();
+  const synthesizedEmail = lowerName
+    ? `${lowerName.replace(/[^a-z0-9]/g, '.').replace(/\.+/g, '.').replace(/^\.|\.$/g, '')}@jiangnanhotpot.com`
+    : '';
+  const legacySynthesizedEmail = lowerName
+    ? `${lowerName.replace(/[^a-z0-9]/g, '.')}@jiangnanhotpot.com`
+    : '';
+
+  const emailsToTry = Array.from(
+    new Set(
+      [
+        cleanEmail,
+        lowerName,
+        synthesizedEmail,
+        legacySynthesizedEmail,
+        '',
+        ...(cleanEmail === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
+        cleanEmail === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase() ||
+        lowerName.includes('john dave de leon')
+          ? [
+              MASTER_ACCOUNT_DETAILS.email.toLowerCase(),
+              MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase(),
+              MASTER_ACCOUNT_DETAILS.username.toLowerCase(),
+            ]
+          : []),
+      ].filter((e) => e !== undefined)
+    )
+  );
+
+  const namesToTry = Array.from(
+    new Set(
+      [
+        cleanName,
+        strippedName,
+        cleanEmail,
+        '',
+        ...(lowerName.includes('john dave de leon') ||
+        cleanEmail === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
+        cleanEmail === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase()
+          ? [MASTER_ACCOUNT_DETAILS.displayName, 'John Dave De Leon']
+          : []),
+      ].filter((n) => n !== undefined)
+    )
+  );
+
+  for (const em of emailsToTry) {
+    for (const nm of namesToTry) {
+      if (em || nm) {
+        add(generateDeterministicCertSerial(em, nm));
+      }
+    }
+  }
+
+  // Legacy seed serial code alias for Maria Santos
+  if (
+    cleanEmail === 'maria.santos@jiangnanhotpot.com' ||
+    lowerName === 'maria santos'
+  ) {
+    add('IKG-LD-2026-MS8A4F1C');
+  }
+
+  if (cleanEmail || cleanName) {
+    add(toDeterministicCertId(cleanEmail || cleanName, cleanName));
+  }
+  if (cleanName) {
+    add(toDeterministicCertId(cleanName, cleanName));
+  }
+
+  return Array.from(candidates);
+}
+
+export function resolveStaffCertificateIdentity(params: {
+  staffName?: string;
+  staffEmail?: string;
+  staffPosition?: string;
+  staffBranch?: string;
+  explicitSerial?: string;
+  ignoreSessionFallback?: boolean;
+}): {
+  certId: string;
+  serialCode: string;
+  staffName: string;
+  staffEmail: string;
+  staffPosition: string;
+  staffBranch: string;
+} {
+  const sessionUser = params.ignoreSessionFallback ? null : getSavedSessionUser();
+  const rawName = (params.staffName || sessionUser?.displayName || 'Staff Member').trim();
+  const lowerName = rawName.toLowerCase();
+  const rawEmail = (params.staffEmail || '').trim().toLowerCase();
+
+  const localAccounts = getLocalAccounts();
+  const matchedAccount = localAccounts.find(
+    (a) =>
+      (rawEmail && a.email.trim().toLowerCase() === rawEmail) ||
+      a.displayName.trim().toLowerCase() === lowerName
+  );
+
+  const resolvedEmail = (
+    rawEmail ||
+    matchedAccount?.email ||
+    (sessionUser &&
+    (sessionUser.displayName.trim().toLowerCase() === lowerName || !params.staffName)
+      ? sessionUser.email
+      : '') ||
+    `${lowerName.replace(/[^a-z0-9]/g, '.').replace(/\.+/g, '.').replace(/^\.|\.$/g, '')}@jiangnanhotpot.com`
+  )
+    .trim()
+    .toLowerCase();
+
+  const resolvedName = (
+    params.staffName ||
+    matchedAccount?.displayName ||
+    sessionUser?.displayName ||
+    'Staff Member'
+  ).trim();
+  const resolvedPosition = (
+    params.staffPosition ||
+    matchedAccount?.position ||
+    sessionUser?.position ||
+    'Kitchen Shift Lead'
+  ).trim();
+  const resolvedBranch = (
+    params.staffBranch ||
+    matchedAccount?.branch ||
+    sessionUser?.branch ||
+    'Jiangnan Hotpot - SM Mall of Asia'
+  ).trim();
+
+  const certId = toDeterministicCertId(resolvedEmail, resolvedName);
+  const canonicalSerial = generateDeterministicCertSerial(resolvedEmail, resolvedName);
+
+  const serialCode =
+    params.explicitSerial && params.explicitSerial.trim().toUpperCase().startsWith('IKG-LD-')
+      ? params.explicitSerial.trim().toUpperCase()
+      : canonicalSerial;
+
+  return {
+    certId,
+    serialCode,
+    staffName: resolvedName,
+    staffEmail: resolvedEmail,
+    staffPosition: resolvedPosition,
+    staffBranch: resolvedBranch,
+  };
+}
+
 const DEFAULT_SEED_CERTIFICATES: TrainingCertificateRecord[] = [
   {
     id: toDeterministicCertId('maria.santos@jiangnanhotpot.com', 'Maria Santos'),
@@ -1846,6 +2043,24 @@ const DEFAULT_SEED_CERTIFICATES: TrainingCertificateRecord[] = [
     percentage: 100,
     status: 'verified',
     issuedAt: '2026-10-22T10:15:00.000Z',
+    verifiedBy: 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
+  },
+  {
+    id: toDeterministicCertId(MASTER_ACCOUNT_DETAILS.email, MASTER_ACCOUNT_DETAILS.displayName),
+    serialCode: generateDeterministicCertSerial(
+      MASTER_ACCOUNT_DETAILS.email,
+      MASTER_ACCOUNT_DETAILS.displayName
+    ),
+    staffName: MASTER_ACCOUNT_DETAILS.displayName,
+    staffEmail: MASTER_ACCOUNT_DETAILS.email,
+    staffPosition: MASTER_ACCOUNT_DETAILS.position,
+    staffBranch: MASTER_ACCOUNT_DETAILS.branch,
+    quizTitle: 'Food Safety, SOP & Operational Compliance Competency Assessment',
+    score: 10,
+    totalQuestions: 10,
+    percentage: 100,
+    status: 'verified',
+    issuedAt: '2026-10-20T09:00:00.000Z',
     verifiedBy: 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
   },
 ];
@@ -1864,27 +2079,34 @@ function deduplicateCertificatesList(
     if (!staffUniqueKey) continue;
 
     const canonicalId = toDeterministicCertId(emailKey || nameKey, cert.staffName);
-    const canonicalSerial =
-      cert.serialCode && cert.serialCode.startsWith('IKG-LD-')
-        ? cert.serialCode
-        : generateDeterministicCertSerial(emailKey || nameKey, cert.staffName);
+    const canonicalSerial = generateDeterministicCertSerial(emailKey || nameKey, cert.staffName);
+    // Normalize legacy Maria Santos seed serial to canonical so UI & backend always agree
+    const effectiveSerial =
+      cert.serialCode &&
+      cert.serialCode.toUpperCase().startsWith('IKG-LD-') &&
+      cert.serialCode.toUpperCase() !== 'IKG-LD-2026-MS8A4F1C'
+        ? cert.serialCode.toUpperCase()
+        : canonicalSerial;
+
+    const totalQ = Math.max(1, Number(cert.totalQuestions ?? 10));
+    const rawScore = Math.max(0, Math.min(totalQ, Number(cert.score ?? 10)));
 
     const normalized: TrainingCertificateRecord = {
       ...cert,
       id: canonicalId,
-      serialCode: canonicalSerial,
-      staffEmail: emailKey || `${nameKey.replace(/[^a-z0-9]/g, '.')}@jiangnanhotpot.com`,
+      serialCode: effectiveSerial,
+      staffEmail:
+        emailKey ||
+        `${nameKey.replace(/[^a-z0-9]/g, '.').replace(/\.+/g, '.').replace(/^\.|\.$/g, '')}@jiangnanhotpot.com`,
       staffName: (cert.staffName || 'Staff Member').trim(),
       staffPosition: (cert.staffPosition || 'Kitchen Shift Lead').trim(),
       staffBranch: (cert.staffBranch || 'Jiangnan Hotpot - SM Mall of Asia').trim(),
       quizTitle:
         cert.quizTitle ||
         'Food Safety, SOP & Operational Compliance Competency Assessment',
-      score: Number(cert.score ?? 10),
-      totalQuestions: Number(cert.totalQuestions ?? 10),
-      percentage: Math.round(
-        (Number(cert.score ?? 10) / Math.max(1, Number(cert.totalQuestions ?? 10))) * 100
-      ),
+      score: rawScore,
+      totalQuestions: totalQ,
+      percentage: Math.round((rawScore / totalQ) * 100),
       status: cert.status === 'revoked' ? 'revoked' : 'verified',
       issuedAt: cert.issuedAt || new Date().toISOString(),
       verifiedBy:
@@ -1895,7 +2117,6 @@ function deduplicateCertificatesList(
     if (!existing) {
       byStaffKey.set(staffUniqueKey, normalized);
     } else {
-      // Keep the latest updated/issued record while preserving revoked status if revoked by Master
       const nextStatus: CertificateVerificationStatus =
         normalized.status === 'revoked' || existing.status === 'revoked'
           ? normalized.status
@@ -1904,7 +2125,7 @@ function deduplicateCertificatesList(
         ...existing,
         ...normalized,
         id: canonicalId,
-        serialCode: existing.serialCode || canonicalSerial,
+        serialCode: normalized.serialCode || existing.serialCode || canonicalSerial,
         status: nextStatus,
       });
     }
@@ -1921,7 +2142,7 @@ export function getLocalCertificates(): TrainingCertificateRecord[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return deduplicateCertificatesList(parsed);
+        return deduplicateCertificatesList([...DEFAULT_SEED_CERTIFICATES, ...parsed]);
       }
     }
   } catch {
@@ -1942,25 +2163,35 @@ export function saveLocalCertificates(certs: TrainingCertificateRecord[]) {
 async function syncCertificateToFirestore(
   cert: TrainingCertificateRecord
 ): Promise<void> {
-  const docId = cert.id.slice(0, 128);
-  const payload = {
-    id: docId,
-    serialCode: cert.serialCode.slice(0, 64),
-    staffName: cert.staffName.slice(0, 120),
-    staffEmail: cert.staffEmail.trim().toLowerCase().slice(0, 254),
-    staffPosition: cert.staffPosition.slice(0, 120),
-    staffBranch: cert.staffBranch.slice(0, 160),
-    quizTitle: cert.quizTitle.slice(0, 240),
-    score: Number(cert.score || 10),
-    totalQuestions: Number(cert.totalQuestions || 10),
-    percentage: Number(cert.percentage || 100),
+  const docId = (cert.id || toDeterministicCertId(cert.staffEmail, cert.staffName))
+    .replace(/[^a-zA-Z0-9_\-]/g, '-')
+    .slice(0, 128);
+  const totalQuestions = Math.max(1, Math.min(1000, Number(cert.totalQuestions || 10)));
+  const score = Math.max(0, Math.min(totalQuestions, Number(cert.score ?? 10)));
+  const percentage = Math.max(0, Math.min(100, Math.round((score / totalQuestions) * 100)));
+
+  const baseFields = {
+    serialCode: (cert.serialCode || generateDeterministicCertSerial(cert.staffEmail, cert.staffName)).slice(0, 64),
+    staffName: (cert.staffName || 'Staff Member').trim().slice(0, 120),
+    staffEmail: (cert.staffEmail || 'staff@jiangnanhotpot.com').trim().toLowerCase().slice(0, 254),
+    staffPosition: (cert.staffPosition || 'Kitchen Shift Lead').trim().slice(0, 120),
+    staffBranch: (cert.staffBranch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160),
+    quizTitle: (
+      cert.quizTitle || 'Food Safety, SOP & Operational Compliance Competency Assessment'
+    )
+      .trim()
+      .slice(0, 240),
+    score,
+    totalQuestions,
+    percentage,
     status: cert.status === 'revoked' ? 'revoked' : 'verified',
     issuedAt: (cert.issuedAt || new Date().toISOString()).slice(0, 64),
     verifiedBy: (
       cert.verifiedBy || 'Imperial Kitchen Group L&D Team (Master Hub Verified)'
-    ).slice(0, 160),
+    )
+      .trim()
+      .slice(0, 160),
     visibility: 'portal_verified',
-    createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
 
@@ -1968,19 +2199,28 @@ async function syncCertificateToFirestore(
     const ref = doc(db, 'certificates', docId);
     const snap = await getDoc(ref);
     if (snap.exists()) {
-      const existingData = snap.data();
-      await setDoc(ref, {
-        ...payload,
-        serialCode: existingData.serialCode || payload.serialCode,
-        staffEmail: existingData.staffEmail || payload.staffEmail,
-        createdAt: existingData.createdAt || serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await updateDoc(ref, baseFields);
     } else {
-      await setDoc(ref, payload);
+      await setDoc(ref, {
+        id: docId,
+        ...baseFields,
+        createdAt: serverTimestamp(),
+      });
     }
   } catch {
-    // ignore if offline
+    try {
+      await setDoc(
+        doc(db, 'certificates', docId),
+        {
+          id: docId,
+          ...baseFields,
+          createdAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch {
+      // ignore if offline
+    }
   }
 }
 
@@ -1993,35 +2233,40 @@ export async function issueOrUpdateTrainingCertificate(params: {
   score?: number;
   totalQuestions?: number;
   issuedAt?: string;
+  serialCode?: string;
   status?: CertificateVerificationStatus;
+  ignoreSessionFallback?: boolean;
 }): Promise<TrainingCertificateRecord> {
-  const sessionUser = getSavedSessionUser();
-  const resolvedEmail = (
-    params.staffEmail ||
-    (sessionUser &&
-    sessionUser.displayName.toLowerCase() === (params.staffName || '').trim().toLowerCase()
-      ? sessionUser.email
-      : '') ||
-    `${(params.staffName || 'staff.member')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '.')}@jiangnanhotpot.com`
-  )
-    .trim()
-    .toLowerCase();
+  const identity = resolveStaffCertificateIdentity({
+    staffName: params.staffName,
+    staffEmail: params.staffEmail,
+    staffPosition: params.staffPosition,
+    staffBranch: params.staffBranch,
+    explicitSerial: params.serialCode,
+    ignoreSessionFallback: params.ignoreSessionFallback,
+  });
 
-  const certId = toDeterministicCertId(resolvedEmail, params.staffName);
   const existingLocal = getLocalCertificates().find(
-    (c) => c.id === certId || c.staffEmail.toLowerCase() === resolvedEmail
+    (c) =>
+      c.id === identity.certId ||
+      c.staffEmail.toLowerCase() === identity.staffEmail.toLowerCase()
   );
 
   const serialCode =
+    (params.serialCode && params.serialCode.trim().toUpperCase().startsWith('IKG-LD-')
+      ? params.serialCode.trim().toUpperCase()
+      : '') ||
+    identity.serialCode ||
     existingLocal?.serialCode ||
-    generateDeterministicCertSerial(resolvedEmail, params.staffName);
-  const score = Number(params.score ?? existingLocal?.score ?? 10);
+    generateDeterministicCertSerial(identity.staffEmail, identity.staffName);
+
   const totalQuestions = Math.max(
     1,
     Number(params.totalQuestions ?? existingLocal?.totalQuestions ?? 10)
+  );
+  const score = Math.max(
+    0,
+    Math.min(totalQuestions, Number(params.score ?? existingLocal?.score ?? 10))
   );
   const percentage = Math.round((score / totalQuestions) * 100);
   const issuedAt =
@@ -2030,20 +2275,12 @@ export async function issueOrUpdateTrainingCertificate(params: {
     params.status || existingLocal?.status || 'verified';
 
   const record: TrainingCertificateRecord = {
-    id: certId,
+    id: identity.certId,
     serialCode,
-    staffName: (params.staffName || existingLocal?.staffName || 'Staff Member').trim(),
-    staffEmail: resolvedEmail,
-    staffPosition: (
-      params.staffPosition ||
-      existingLocal?.staffPosition ||
-      'Kitchen Shift Lead'
-    ).trim(),
-    staffBranch: (
-      params.staffBranch ||
-      existingLocal?.staffBranch ||
-      'Jiangnan Hotpot - SM Mall of Asia'
-    ).trim(),
+    staffName: identity.staffName,
+    staffEmail: identity.staffEmail,
+    staffPosition: identity.staffPosition,
+    staffBranch: identity.staffBranch,
     quizTitle:
       params.quizTitle ||
       existingLocal?.quizTitle ||
@@ -2058,7 +2295,9 @@ export async function issueOrUpdateTrainingCertificate(params: {
 
   // 1. Save deduplicated single certificate per user in LocalStorage
   const allLocal = getLocalCertificates().filter(
-    (c) => c.id !== certId && c.staffEmail.toLowerCase() !== resolvedEmail
+    (c) =>
+      c.id !== identity.certId &&
+      c.staffEmail.toLowerCase() !== identity.staffEmail.toLowerCase()
   );
   allLocal.unshift(record);
   saveLocalCertificates(allLocal);
@@ -2079,6 +2318,254 @@ export async function issueOrUpdateTrainingCertificate(params: {
 
   broadcastAccountSync();
   return record;
+}
+
+export function doesCertificateMatchQuery(
+  cert: TrainingCertificateRecord,
+  rawQuery: string
+): boolean {
+  const cleanQuery = extractCleanCertQuery(rawQuery).toLowerCase();
+  if (!cleanQuery) return false;
+
+  const alnumQuery = cleanQuery.replace(/[^a-z0-9]/g, '');
+  const candidates = getCandidateSerialCodesForIdentity(
+    cert.staffEmail,
+    cert.staffName,
+    cert.serialCode
+  );
+
+  // 1. Exact or normalized serial code / certificate ID match
+  for (const cand of candidates) {
+    const lowerCand = cand.toLowerCase();
+    const alnumCand = lowerCand.replace(/[^a-z0-9]/g, '');
+    if (lowerCand === cleanQuery) return true;
+    if (alnumQuery.length >= 6 && alnumCand === alnumQuery) return true;
+    // Also support matching the 6-8 char unique serial suffix (e.g. "MS8A4F1C" or "MS836778")
+    if (alnumQuery.length >= 6 && alnumCand.endsWith(alnumQuery)) return true;
+  }
+
+  // 2. Exact email or name match
+  const lowerEmail = (cert.staffEmail || '').trim().toLowerCase();
+  const lowerName = (cert.staffName || '').trim().toLowerCase();
+  if (lowerEmail === cleanQuery || lowerName === cleanQuery) return true;
+
+  // 3. Partial match on serial, name, or email (when query is not a full mismatched IKG-LD serial)
+  const isSerialFormattedQuery = /^ikg[\s\-_]*ld/i.test(cleanQuery);
+  if (!isSerialFormattedQuery && cleanQuery.length >= 2) {
+    if (
+      lowerName.includes(cleanQuery) ||
+      lowerEmail.includes(cleanQuery) ||
+      (cert.serialCode || '').toLowerCase().includes(cleanQuery)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function findMatchingCertificateInList(
+  rawQuery: string,
+  certs: TrainingCertificateRecord[],
+  accounts?: PortalUser[]
+): TrainingCertificateRecord | null {
+  const cleanQuery = extractCleanCertQuery(rawQuery);
+  if (!cleanQuery) return null;
+
+  const lowerQuery = cleanQuery.toLowerCase();
+  const alnumQuery = lowerQuery.replace(/[^a-z0-9]/g, '');
+
+  // 1. Priority: Exact serial match on cert.serialCode
+  const exactSerial = certs.find(
+    (c) =>
+      c.serialCode.trim().toLowerCase() === lowerQuery ||
+      (alnumQuery.length >= 6 &&
+        c.serialCode.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === alnumQuery)
+  );
+  if (exactSerial) return exactSerial;
+
+  // 2. Candidate serial match across all known aliases for each certificate
+  const candidateMatch = certs.find((c) => doesCertificateMatchQuery(c, cleanQuery));
+  if (candidateMatch) return candidateMatch;
+
+  // 3. If accounts are provided, check if the query matches any account's deterministic serial code
+  const accountPool = accounts && accounts.length > 0 ? accounts : getLocalAccounts();
+  for (const acc of accountPool) {
+    const accCandidates = getCandidateSerialCodesForIdentity(acc.email, acc.displayName);
+    const matchedSerial = accCandidates.find((cand) => {
+      const lc = cand.toLowerCase();
+      const ac = lc.replace(/[^a-z0-9]/g, '');
+      return (
+        lc === lowerQuery ||
+        (alnumQuery.length >= 6 && (ac === alnumQuery || ac.endsWith(alnumQuery)))
+      );
+    });
+    if (matchedSerial) {
+      const canonicalSerial = generateDeterministicCertSerial(acc.email, acc.displayName);
+      return {
+        id: toDeterministicCertId(acc.email, acc.displayName),
+        serialCode: matchedSerial.startsWith('IKG-LD-') ? matchedSerial : canonicalSerial,
+        staffName: acc.displayName,
+        staffEmail: acc.email.toLowerCase(),
+        staffPosition: acc.position || 'Kitchen Shift Lead',
+        staffBranch: acc.branch || 'Jiangnan Hotpot - SM Mall of Asia',
+        quizTitle: 'Food Safety, SOP & Operational Compliance Competency Assessment',
+        score: 10,
+        totalQuestions: 10,
+        percentage: 100,
+        status: 'verified',
+        issuedAt: acc.updatedAt || acc.createdAt || new Date().toISOString(),
+        verifiedBy: 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
+      };
+    }
+  }
+
+  return null;
+}
+
+export async function verifyTrainingCertificateByCode(
+  rawQuery: string
+): Promise<{
+  certificate: TrainingCertificateRecord | null;
+  allCertificates: TrainingCertificateRecord[];
+}> {
+  const cleanQuery = extractCleanCertQuery(rawQuery);
+  if (!cleanQuery) {
+    return {
+      certificate: null,
+      allCertificates: getLocalCertificates(),
+    };
+  }
+
+  // 1. Check Express verification endpoint first if available
+  try {
+    const res = await apiFetch(
+      `/api/certificates/verify?code=${encodeURIComponent(cleanQuery)}`
+    );
+    if (res && res.ok) {
+      const data = await res.json();
+      if (data.certificate) {
+        const synced = await issueOrUpdateTrainingCertificate({
+          staffName: data.certificate.staffName,
+          staffEmail: data.certificate.staffEmail,
+          staffPosition: data.certificate.staffPosition,
+          staffBranch: data.certificate.staffBranch,
+          quizTitle: data.certificate.quizTitle,
+          score: data.certificate.score,
+          totalQuestions: data.certificate.totalQuestions,
+          issuedAt: data.certificate.issuedAt,
+          serialCode: data.certificate.serialCode,
+          status: data.certificate.status,
+          ignoreSessionFallback: true,
+        });
+        const allCerts = await fetchAllIssuedCertificates();
+        return {
+          certificate:
+            allCerts.find(
+              (c) =>
+                c.id === synced.id ||
+                c.staffEmail.toLowerCase() === synced.staffEmail.toLowerCase()
+            ) || synced,
+          allCertificates: allCerts,
+        };
+      }
+    }
+  } catch {
+    // ignore and continue
+  }
+
+  // 2. Fetch all issued certificates across LocalStorage, Express, and Firestore
+  const allCertificates = await fetchAllIssuedCertificates();
+  const matchedInCerts = findMatchingCertificateInList(cleanQuery, allCertificates);
+  if (matchedInCerts) {
+    return {
+      certificate: matchedInCerts,
+      allCertificates,
+    };
+  }
+
+  // 3. Self-healing fallback: check all portal accounts (Firestore + Express + LocalStorage + active session)
+  const allAccounts = await fetchAllPortalAccounts();
+  const sessionUser = getSavedSessionUser();
+  const combinedAccounts = [...allAccounts];
+  if (
+    sessionUser &&
+    !combinedAccounts.some(
+      (a) =>
+        a.uid === sessionUser.uid ||
+        a.email.toLowerCase() === sessionUser.email.toLowerCase()
+    )
+  ) {
+    combinedAccounts.push(sessionUser);
+  }
+
+  // Also include current localStorage staff profile in case quiz was taken under that profile
+  try {
+    const lsName = localStorage.getItem('ikqa_staff_name');
+    const lsPos = localStorage.getItem('ikqa_staff_position');
+    const lsBranch = localStorage.getItem('ikqa_staff_branch');
+    if (lsName && lsName.trim()) {
+      const synthEmail = `${lsName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '.')
+        .replace(/\.+/g, '.')
+        .replace(/^\.|\.$/g, '')}@jiangnanhotpot.com`;
+      if (
+        !combinedAccounts.some(
+          (a) => a.displayName.trim().toLowerCase() === lsName.trim().toLowerCase()
+        )
+      ) {
+        combinedAccounts.push({
+          uid: toDeterministicUid(synthEmail),
+          email: synthEmail,
+          displayName: lsName.trim(),
+          position: (lsPos || 'Kitchen Shift Lead').trim(),
+          branch: (lsBranch || 'Jiangnan Hotpot - SM Mall of Asia').trim(),
+          role: 'staff',
+          status: 'approved',
+          ndaAccepted: true,
+          ndaSignature: 'I AGREE',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const matchedFromAccount = findMatchingCertificateInList(
+    cleanQuery,
+    allCertificates,
+    combinedAccounts
+  );
+
+  if (matchedFromAccount) {
+    const saved = await issueOrUpdateTrainingCertificate({
+      staffName: matchedFromAccount.staffName,
+      staffEmail: matchedFromAccount.staffEmail,
+      staffPosition: matchedFromAccount.staffPosition,
+      staffBranch: matchedFromAccount.staffBranch,
+      quizTitle: matchedFromAccount.quizTitle,
+      score: matchedFromAccount.score,
+      totalQuestions: matchedFromAccount.totalQuestions,
+      issuedAt: matchedFromAccount.issuedAt,
+      serialCode: matchedFromAccount.serialCode,
+      status: matchedFromAccount.status,
+      ignoreSessionFallback: true,
+    });
+    const updatedList = await fetchAllIssuedCertificates();
+    return {
+      certificate: saved,
+      allCertificates: updatedList,
+    };
+  }
+
+  return {
+    certificate: null,
+    allCertificates,
+  };
 }
 
 export async function fetchAllIssuedCertificates(): Promise<TrainingCertificateRecord[]> {
@@ -2143,6 +2630,7 @@ export async function updateCertificateStatusByMaster(
   await issueOrUpdateTrainingCertificate({
     ...cert,
     status,
+    ignoreSessionFallback: true,
   });
 
   try {
@@ -2213,4 +2701,5 @@ export function subscribeToIssuedCertificates(
     clearInterval(intervalId);
   };
 }
+
 

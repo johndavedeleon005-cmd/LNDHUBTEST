@@ -283,11 +283,11 @@ service cloud.firestore {
       allow update: if isValidCertificate(incoming()) &&
         isValidId(certId) &&
         incoming().id == existing().id &&
-        incoming().serialCode == existing().serialCode &&
-        incoming().staffEmail == existing().staffEmail &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
+          'serialCode',
           'staffName',
+          'staffEmail',
           'staffPosition',
           'staffBranch',
           'quizTitle',

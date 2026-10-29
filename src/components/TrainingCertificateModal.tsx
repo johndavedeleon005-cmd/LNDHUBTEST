@@ -17,10 +17,9 @@ import {
 } from 'lucide-react';
 import {
   generateDeterministicCertSerial,
-  getSavedSessionUser,
   issueOrUpdateTrainingCertificate,
   getLocalCertificates,
-  toDeterministicCertId,
+  resolveStaffCertificateIdentity,
 } from '../services/authAndUploadService';
 import { CertificateVerificationStatus } from '../types/foodSafety';
 
@@ -62,31 +61,24 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
   const instanceId = useId();
   const [isPrimaryInstance, setIsPrimaryInstance] = useState(false);
 
-  const sessionUser = getSavedSessionUser();
-  const lockedName = (staffName || sessionUser?.displayName || 'Staff Member').trim();
-  const lockedPosition = (staffPosition || sessionUser?.position || 'Kitchen Shift Lead').trim();
-  const lockedBranch = (
-    staffBranch ||
-    sessionUser?.branch ||
-    'Jiangnan Hotpot - SM Mall of Asia'
-  ).trim();
-  const resolvedEmail = (
-    staffEmail ||
-    (sessionUser &&
-    sessionUser.displayName.toLowerCase() === lockedName.toLowerCase()
-      ? sessionUser.email
-      : '') ||
-    `${lockedName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@jiangnanhotpot.com`
-  )
-    .trim()
-    .toLowerCase();
+  const identity = resolveStaffCertificateIdentity({
+    staffName,
+    staffEmail,
+    staffPosition,
+    staffBranch,
+    explicitSerial: propSerialCode,
+    ignoreSessionFallback: readOnlyPreview,
+  });
+
+  const lockedName = identity.staffName;
+  const lockedPosition = identity.staffPosition;
+  const lockedBranch = identity.staffBranch;
+  const resolvedEmail = identity.staffEmail;
 
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [copiedSerial, setCopiedSerial] = useState(false);
   const [dateTimeStr, setDateTimeStr] = useState('');
-  const [certSerial, setCertSerial] = useState(() =>
-    propSerialCode || generateDeterministicCertSerial(resolvedEmail, lockedName)
-  );
+  const [certSerial, setCertSerial] = useState(() => identity.serialCode);
   const [certStatus, setCertStatus] = useState<CertificateVerificationStatus>(
     propVerificationStatus || 'verified'
   );
@@ -114,12 +106,12 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
   }, [isOpen, instanceId]);
 
   useEffect(() => {
-    if (!isOpen || !isPrimaryInstance) return;
+    if (!isOpen) return;
 
     const existingCert = getLocalCertificates().find(
       (c) =>
-        c.id === toDeterministicCertId(resolvedEmail, lockedName) ||
-        c.staffEmail.toLowerCase() === resolvedEmail
+        c.id === identity.certId ||
+        c.staffEmail.toLowerCase() === resolvedEmail.toLowerCase()
     );
 
     const effectiveIso = completedAt || existingCert?.issuedAt || new Date().toISOString();
@@ -142,6 +134,7 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
     const deterministicSerial =
       propSerialCode ||
       existingCert?.serialCode ||
+      identity.serialCode ||
       generateDeterministicCertSerial(resolvedEmail, lockedName);
     setCertSerial(deterministicSerial);
     setCertStatus(propVerificationStatus || existingCert?.status || 'verified');
@@ -156,6 +149,7 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
         score,
         totalQuestions,
         issuedAt: effectiveIso,
+        serialCode: deterministicSerial,
       })
         .then((savedRecord) => {
           setCertSerial(savedRecord.serialCode);
@@ -165,8 +159,9 @@ export const TrainingCertificateModal: React.FC<TrainingCertificateModalProps> =
     }
   }, [
     isOpen,
-    isPrimaryInstance,
     completedAt,
+    identity.certId,
+    identity.serialCode,
     lockedName,
     lockedPosition,
     lockedBranch,

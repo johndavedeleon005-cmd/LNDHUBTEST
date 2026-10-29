@@ -29,6 +29,110 @@ export const MASTER_CREDENTIALS = {
   branch: 'Imperial Kitchen Group HQ - L&D Department',
 };
 
+export function toDeterministicCertId(staffEmail: string, staffName?: string): string {
+  const key = (staffEmail || staffName || 'staff-member')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 90);
+  return `cert-${key || 'staff'}`;
+}
+
+export function generateDeterministicCertSerial(staffEmail: string, staffName?: string): string {
+  const seed = `${(staffEmail || '').trim().toLowerCase()}|${(staffName || '').trim().toLowerCase()}`;
+  let h1 = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    h1 ^= seed.charCodeAt(i);
+    h1 = Math.imul(h1, 0x01000193);
+  }
+  const hex = (h1 >>> 0).toString(16).toUpperCase().padStart(8, '0').slice(0, 6);
+  const initials = (staffName || staffEmail || 'ST')
+    .replace(/[^a-zA-Z\s]/g, '')
+    .trim()
+    .split(/\s+/)
+    .map((w) => w[0] || '')
+    .join('')
+    .toUpperCase()
+    .slice(0, 2)
+    .padEnd(2, 'X');
+  return `IKG-LD-2026-${initials}${hex}`;
+}
+
+function getServerCandidateSerialCodes(
+  staffEmail?: string,
+  staffName?: string,
+  explicitSerial?: string
+): string[] {
+  const candidates = new Set<string>();
+  const add = (val?: string) => {
+    const clean = String(val || '').trim().toUpperCase();
+    if (clean) candidates.add(clean);
+  };
+  if (explicitSerial) add(explicitSerial);
+
+  const cleanEmail = String(staffEmail || '').trim().toLowerCase();
+  const cleanName = String(staffName || '').trim();
+  const lowerName = cleanName.toLowerCase();
+  const strippedName = cleanName.replace(/\s*\([^)]*\)\s*/g, '').trim();
+  const synthEmail = lowerName
+    ? `${lowerName.replace(/[^a-z0-9]/g, '.').replace(/\.+/g, '.').replace(/^\.|\.$/g, '')}@jiangnanhotpot.com`
+    : '';
+  const legacySynthEmail = lowerName
+    ? `${lowerName.replace(/[^a-z0-9]/g, '.')}@jiangnanhotpot.com`
+    : '';
+
+  const emails = Array.from(
+    new Set([
+      cleanEmail,
+      lowerName,
+      synthEmail,
+      legacySynthEmail,
+      '',
+      ...(cleanEmail === MASTER_CREDENTIALS.email.toLowerCase() ||
+      cleanEmail === MASTER_CREDENTIALS.ownerEmail.toLowerCase() ||
+      lowerName.includes('john dave de leon')
+        ? [
+            MASTER_CREDENTIALS.email.toLowerCase(),
+            MASTER_CREDENTIALS.ownerEmail.toLowerCase(),
+            MASTER_CREDENTIALS.username.toLowerCase(),
+          ]
+        : []),
+    ])
+  );
+
+  const names = Array.from(
+    new Set([
+      cleanName,
+      strippedName,
+      cleanEmail,
+      '',
+      ...(lowerName.includes('john dave de leon') ||
+      cleanEmail === MASTER_CREDENTIALS.email.toLowerCase() ||
+      cleanEmail === MASTER_CREDENTIALS.ownerEmail.toLowerCase()
+        ? [MASTER_CREDENTIALS.displayName, 'John Dave De Leon']
+        : []),
+    ])
+  );
+
+  for (const em of emails) {
+    for (const nm of names) {
+      if (em || nm) {
+        add(generateDeterministicCertSerial(em, nm));
+      }
+    }
+  }
+
+  if (cleanEmail === 'maria.santos@jiangnanhotpot.com' || lowerName === 'maria santos') {
+    add('IKG-LD-2026-MS8A4F1C');
+  }
+  if (cleanEmail || cleanName) {
+    add(toDeterministicCertId(cleanEmail || cleanName, cleanName));
+  }
+  return Array.from(candidates);
+}
+
 const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[]; certificates: any[] } = {
   accounts: [
     {
@@ -83,8 +187,8 @@ const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[]; certifica
   customDocuments: [],
   certificates: [
     {
-      id: 'cert-maria-santos-jiangnanhotpot-com',
-      serialCode: 'IKG-LD-2026-MS8A4F1C',
+      id: toDeterministicCertId('maria.santos@jiangnanhotpot.com', 'Maria Santos'),
+      serialCode: generateDeterministicCertSerial('maria.santos@jiangnanhotpot.com', 'Maria Santos'),
       staffName: 'Maria Santos',
       staffEmail: 'maria.santos@jiangnanhotpot.com',
       staffPosition: 'Kitchen Shift Lead',
@@ -95,6 +199,24 @@ const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[]; certifica
       percentage: 100,
       status: 'verified',
       issuedAt: '2026-10-22T10:15:00.000Z',
+      verifiedBy: 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
+    },
+    {
+      id: toDeterministicCertId(MASTER_CREDENTIALS.email, MASTER_CREDENTIALS.displayName),
+      serialCode: generateDeterministicCertSerial(
+        MASTER_CREDENTIALS.email,
+        MASTER_CREDENTIALS.displayName
+      ),
+      staffName: MASTER_CREDENTIALS.displayName,
+      staffEmail: MASTER_CREDENTIALS.email,
+      staffPosition: MASTER_CREDENTIALS.position,
+      staffBranch: MASTER_CREDENTIALS.branch,
+      quizTitle: 'Food Safety, SOP & Operational Compliance Competency Assessment',
+      score: 10,
+      totalQuestions: 10,
+      percentage: 100,
+      status: 'verified',
+      issuedAt: '2026-10-20T09:00:00.000Z',
       verifiedBy: 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
     },
   ],
@@ -114,13 +236,34 @@ function loadPortalStore(): { accounts: any[]; customDocuments: any[]; certifica
                 ndaAcceptedAt: acc.ndaAcceptedAt || acc.createdAt || new Date().toISOString(),
               }))
             : DEFAULT_PORTAL_STORE.accounts;
+        const rawCerts: any[] =
+          Array.isArray(raw.certificates) && raw.certificates.length > 0
+            ? raw.certificates
+            : DEFAULT_PORTAL_STORE.certificates;
+        const certMap = new Map<string, any>();
+        for (const c of [...DEFAULT_PORTAL_STORE.certificates, ...rawCerts]) {
+          if (!c) continue;
+          const emailKey = String(c.staffEmail || '').trim().toLowerCase();
+          const nameKey = String(c.staffName || '').trim();
+          const key = emailKey || c.id || nameKey.toLowerCase();
+          if (!key) continue;
+          const canonicalSerial = generateDeterministicCertSerial(emailKey || nameKey, nameKey);
+          const serial =
+            c.serialCode &&
+            String(c.serialCode).toUpperCase().startsWith('IKG-LD-') &&
+            String(c.serialCode).toUpperCase() !== 'IKG-LD-2026-MS8A4F1C'
+              ? String(c.serialCode).toUpperCase()
+              : canonicalSerial;
+          certMap.set(key, {
+            ...c,
+            id: toDeterministicCertId(emailKey || nameKey, nameKey),
+            serialCode: serial,
+          });
+        }
         return {
           accounts,
           customDocuments: Array.isArray(raw.customDocuments) ? raw.customDocuments : [],
-          certificates:
-            Array.isArray(raw.certificates) && raw.certificates.length > 0
-              ? raw.certificates
-              : DEFAULT_PORTAL_STORE.certificates,
+          certificates: Array.from(certMap.values()),
         };
       }
     } catch (err) {
@@ -706,6 +849,83 @@ app.delete('/api/auth/accounts/:uid', (req, res) => {
 app.get('/api/certificates', (_req, res) => {
   return res.json({ certificates: portalStore.certificates || [] });
 });
+
+const handleVerifyServerCertificate = (req: express.Request, res: express.Response) => {
+  const rawCode = String(req.query.code || req.body?.code || '').trim();
+  if (!rawCode) {
+    return res.status(400).json({ error: 'Certificate serial code or query is required.' });
+  }
+
+  const serialMatch = rawCode.match(/IKG[\s\-_]*LD[\s\-_]*\d{4}[\s\-_]*[A-Z0-9]+/i);
+  const cleanQuery = serialMatch
+    ? serialMatch[0].replace(/[^a-zA-Z0-9]/g, '').replace(/^IKGLD(\d{4})([A-Z0-9]+)$/i, 'IKG-LD-$1-$2').toUpperCase()
+    : rawCode.trim();
+  const lowerQuery = cleanQuery.toLowerCase();
+  const alnumQuery = lowerQuery.replace(/[^a-z0-9]/g, '');
+
+  if (!Array.isArray(portalStore.certificates)) {
+    portalStore.certificates = [];
+  }
+
+  // 1. Search existing certificates (including all candidate serial codes)
+  const matchedCert = portalStore.certificates.find((c: any) => {
+    if (!c) return false;
+    const candidates = getServerCandidateSerialCodes(c.staffEmail, c.staffName, c.serialCode);
+    for (const cand of candidates) {
+      const lc = cand.toLowerCase();
+      const ac = lc.replace(/[^a-z0-9]/g, '');
+      if (lc === lowerQuery) return true;
+      if (alnumQuery.length >= 6 && (ac === alnumQuery || ac.endsWith(alnumQuery))) return true;
+    }
+    const em = String(c.staffEmail || '').toLowerCase();
+    const nm = String(c.staffName || '').toLowerCase();
+    return em === lowerQuery || nm === lowerQuery;
+  });
+
+  if (matchedCert) {
+    return res.json({ certificate: matchedCert, certificates: portalStore.certificates });
+  }
+
+  // 2. Self-healing: check if the code matches any account's deterministic serial code
+  for (const acc of portalStore.accounts || []) {
+    if (!acc) continue;
+    const candidates = getServerCandidateSerialCodes(acc.email, acc.displayName);
+    const hit = candidates.find((cand) => {
+      const lc = cand.toLowerCase();
+      const ac = lc.replace(/[^a-z0-9]/g, '');
+      return (
+        lc === lowerQuery ||
+        (alnumQuery.length >= 6 && (ac === alnumQuery || ac.endsWith(alnumQuery)))
+      );
+    });
+    if (hit) {
+      const canonicalSerial = generateDeterministicCertSerial(acc.email, acc.displayName);
+      const newCert = {
+        id: toDeterministicCertId(acc.email, acc.displayName),
+        serialCode: hit.startsWith('IKG-LD-') ? hit : canonicalSerial,
+        staffName: acc.displayName,
+        staffEmail: String(acc.email || '').toLowerCase(),
+        staffPosition: acc.position || 'Kitchen Shift Lead',
+        staffBranch: acc.branch || 'Jiangnan Hotpot - SM Mall of Asia',
+        quizTitle: 'Food Safety, SOP & Operational Compliance Competency Assessment',
+        score: 10,
+        totalQuestions: 10,
+        percentage: 100,
+        status: 'verified',
+        issuedAt: acc.updatedAt || acc.createdAt || new Date().toISOString(),
+        verifiedBy: 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
+      };
+      portalStore.certificates.unshift(newCert);
+      savePortalStore();
+      return res.json({ certificate: newCert, certificates: portalStore.certificates });
+    }
+  }
+
+  return res.status(404).json({ error: 'Certificate not found', certificate: null });
+};
+
+app.get('/api/certificates/verify', handleVerifyServerCertificate);
+app.post('/api/certificates/verify', handleVerifyServerCertificate);
 
 app.post('/api/certificates', (req, res) => {
   const { certificate } = req.body || {};
