@@ -69,34 +69,39 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
 
   return (
     <nav className="sticky bottom-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 pb-safe shadow-2xl">
-      <div className="flex items-center justify-around px-1 py-1 max-w-2xl mx-auto">
+      <div className="flex items-center justify-around px-1 py-1 max-w-2xl mx-auto overflow-x-auto no-scrollbar">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           const Icon = tab.icon;
+          const isMasterTab = tab.id === 'master';
 
           return (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
-              className="flex-1 min-w-0 py-1.5 px-0.5 flex flex-col items-center justify-center relative group active:scale-95 transition-transform cursor-pointer"
+              className={`flex-1 min-w-[54px] py-1.5 px-0.5 flex flex-col items-center justify-center relative group active:scale-95 transition-transform cursor-pointer ${
+                isMasterTab ? 'bg-amber-500/5 rounded-xl border border-amber-500/30 mx-0.5' : ''
+              }`}
             >
               {/* Material 3 active pill indicator */}
               <div
                 className={`relative px-3 py-1 rounded-full transition-all duration-200 flex items-center justify-center ${
                   isActive
-                    ? tab.id === 'master'
-                      ? 'bg-amber-500/20 text-amber-300 font-semibold shadow-inner'
+                    ? isMasterTab
+                      ? 'bg-amber-500 text-slate-950 font-black shadow-md'
                       : 'bg-red-500/20 text-red-400 font-semibold shadow-inner'
+                    : isMasterTab
+                    ? 'bg-amber-500/20 text-amber-300 group-hover:bg-amber-500/30'
                     : 'text-slate-400 hover:text-slate-200 group-hover:bg-slate-800/50'
                 }`}
               >
                 <Icon
                   className={`w-5 h-5 transition-transform ${
                     isActive
-                      ? tab.id === 'master'
-                        ? 'scale-110 text-amber-400'
+                      ? isMasterTab
+                        ? 'scale-110 text-slate-950'
                         : 'scale-110 text-red-400'
-                      : tab.id === 'master'
+                      : isMasterTab
                       ? 'text-amber-400'
                       : 'text-slate-400'
                   } ${tab.activePulse ? 'animate-bounce text-amber-400' : ''}`}
@@ -105,8 +110,8 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
                 {tab.badge && (
                   <span
                     className={`absolute -top-1 -right-1 px-1 min-w-[15px] h-[15px] text-[9px] font-bold rounded-full flex items-center justify-center border border-slate-900 ${
-                      tab.id === 'master'
-                        ? 'bg-amber-500 text-slate-950'
+                      isMasterTab
+                        ? 'bg-amber-400 text-slate-950 font-black'
                         : 'bg-red-600 text-white'
                     }`}
                   >
@@ -123,9 +128,11 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
               <span
                 className={`text-[10px] sm:text-[11px] mt-0.5 tracking-tight transition-colors whitespace-nowrap truncate max-w-full ${
                   isActive
-                    ? tab.id === 'master'
-                      ? 'text-amber-400 font-bold'
+                    ? isMasterTab
+                      ? 'text-amber-300 font-black'
                       : 'text-red-400 font-bold'
+                    : isMasterTab
+                    ? 'text-amber-300 font-bold'
                     : 'text-slate-400'
                 }`}
               >

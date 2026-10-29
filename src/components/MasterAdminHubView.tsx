@@ -67,6 +67,8 @@ interface MasterAdminHubViewProps {
   onAccountProfileUpdated?: (updatedAccount: PortalUser) => void;
   initialCertVerifyCode?: string | null;
   onClearInitialCertVerifyCode?: () => void;
+  initialSection?: 'approvals' | 'uploader' | 'certificates' | 'credentials' | null;
+  onClearInitialSection?: () => void;
 }
 
 const SAMPLE_UPLOAD_TEMPLATES: {
@@ -156,10 +158,21 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   onAccountProfileUpdated,
   initialCertVerifyCode,
   onClearInitialCertVerifyCode,
+  initialSection,
+  onClearInitialSection,
 }) => {
   const [activeSection, setActiveSection] = useState<
     'approvals' | 'uploader' | 'certificates' | 'credentials'
-  >('certificates');
+  >(initialSection || 'certificates');
+
+  useEffect(() => {
+    if (initialSection) {
+      setActiveSection(initialSection);
+      if (onClearInitialSection) {
+        onClearInitialSection();
+      }
+    }
+  }, [initialSection, onClearInitialSection]);
 
   // Accounts state
   const [accounts, setAccounts] = useState<PortalUser[]>([]);
@@ -174,12 +187,13 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   const [savingProfileUid, setSavingProfileUid] = useState<string | null>(null);
   const [savedProfileMessage, setSavedProfileMessage] = useState<string | null>(null);
 
-  // Quick Add Staff by Master state
+  // Quick Add Staff / Master Account by Master state
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPassword, setNewStaffPassword] = useState('Staff2026!');
   const [newStaffPosition, setNewStaffPosition] = useState('FOH Receptionist');
   const [newStaffBranch, setNewStaffBranch] = useState('Jiangnan Hotpot - SM Mall of Asia');
+  const [newStaffRole, setNewStaffRole] = useState<'staff' | 'master'>('staff');
   const [showAddStaffForm, setShowAddStaffForm] = useState(false);
 
   // Certificate Verification & Single-Certificate Registry state
@@ -410,7 +424,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
         branch: newStaffBranch,
         preserveCurrentSession: true,
       });
-      const updated = await updateAccountApprovalStatus(created, 'approved', 'staff');
+      const updated = await updateAccountApprovalStatus(created, 'approved', newStaffRole);
       setAccounts(updated);
       setNewStaffName('');
       setNewStaffEmail('');
@@ -1437,7 +1451,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
               className="p-4 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-3"
             >
               <div className="text-xs font-bold text-amber-300">
-                Create Pre-Approved Staff Account (Master Direct Provisioning)
+                Create Pre-Approved Staff or Master Account (Master Direct Provisioning)
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <input
@@ -1462,7 +1476,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                   className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
                 <input
                   type="text"
                   value={newStaffPosition}
@@ -1477,11 +1491,19 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                   placeholder="Branch"
                   className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
+                <select
+                  value={newStaffRole}
+                  onChange={(e) => setNewStaffRole(e.target.value as 'staff' | 'master')}
+                  className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-300"
+                >
+                  <option value="staff">Role: Staff Account</option>
+                  <option value="master">Role: Master Account (Full Master Hub)</option>
+                </select>
                 <button
                   type="submit"
                   className="py-2 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs cursor-pointer"
                 >
-                  Save & Approve Account
+                  Save &amp; Approve Account
                 </button>
               </div>
             </form>

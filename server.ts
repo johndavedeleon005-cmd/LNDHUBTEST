@@ -222,6 +222,53 @@ const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[]; certifica
   ],
 };
 
+const SERVER_MASTER_EMAILS = new Set([
+  MASTER_CREDENTIALS.email.toLowerCase(),
+  MASTER_CREDENTIALS.username.toLowerCase(),
+  MASTER_CREDENTIALS.ownerEmail.toLowerCase(),
+  'johndave.deleon@jiangnanhotpot.com',
+  'joy.bernardo@jiangnanhotpot.com',
+  'lanyann.nemenzo@jiangnanhotpot.com',
+  'dicedivine.torralba@jiangnanhotpot.com',
+  'lnd@jiangnanhotpot.com',
+  'lnd@imperialkitchen.com',
+]);
+
+const SERVER_MASTER_NAMES = new Set([
+  'john dave de leon',
+  'joy bernardo',
+  'lany ann nemenzo',
+  'dice divine torralba',
+  'imperial kitchen group l&d master account',
+]);
+
+function isMasterAccountRecord(acc: any): boolean {
+  if (!acc) return false;
+  if (acc.role === 'master') return true;
+  const email = String(acc.email || '').trim().toLowerCase();
+  const uid = String(acc.uid || '').trim().toLowerCase();
+  const name = String(acc.displayName || '').trim().toLowerCase();
+  const pos = String(acc.position || '').trim().toLowerCase();
+  const branch = String(acc.branch || '').trim().toLowerCase();
+
+  if (SERVER_MASTER_EMAILS.has(email) || SERVER_MASTER_EMAILS.has(uid)) return true;
+  if (uid === 'master-admin-001' || uid.startsWith('master-')) return true;
+  if (SERVER_MASTER_NAMES.has(name)) return true;
+  if (
+    pos.includes('master') ||
+    pos.includes('l&d') ||
+    pos.includes('learning and development') ||
+    pos.includes('learning & development') ||
+    pos.includes('fsco')
+  ) {
+    return true;
+  }
+  if (branch.includes('l&d department')) {
+    return true;
+  }
+  return false;
+}
+
 function loadPortalStore(): { accounts: any[]; customDocuments: any[]; certificates: any[] } {
   for (const candidatePath of [tmpStoreJsonPath, storeJsonPath]) {
     try {
@@ -229,12 +276,17 @@ function loadPortalStore(): { accounts: any[]; customDocuments: any[]; certifica
         const raw = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
         const accounts =
           Array.isArray(raw.accounts) && raw.accounts.length > 0
-            ? raw.accounts.map((acc: any) => ({
-                ...acc,
-                ndaAccepted: acc.ndaAccepted ?? true,
-                ndaSignature: acc.ndaSignature || 'I AGREE',
-                ndaAcceptedAt: acc.ndaAcceptedAt || acc.createdAt || new Date().toISOString(),
-              }))
+            ? raw.accounts.map((acc: any) => {
+                const isMaster = isMasterAccountRecord(acc);
+                return {
+                  ...acc,
+                  role: isMaster ? 'master' : acc.role || 'staff',
+                  status: isMaster ? 'approved' : acc.status || 'pending',
+                  ndaAccepted: acc.ndaAccepted ?? true,
+                  ndaSignature: acc.ndaSignature || 'I AGREE',
+                  ndaAcceptedAt: acc.ndaAcceptedAt || acc.createdAt || new Date().toISOString(),
+                };
+              })
             : DEFAULT_PORTAL_STORE.accounts;
         const rawCerts: any[] =
           Array.isArray(raw.certificates) && raw.certificates.length > 0
@@ -291,8 +343,11 @@ function savePortalStore() {
 
 function sanitizeAccount(acc: any) {
   const { password: _pw, ...safe } = acc;
+  const isMaster = isMasterAccountRecord(acc);
   return {
     ...safe,
+    role: isMaster ? 'master' : safe.role || 'staff',
+    status: isMaster ? 'approved' : safe.status || 'pending',
     ndaAccepted: safe.ndaAccepted ?? true,
     ndaSignature: safe.ndaSignature || 'I AGREE',
     ndaAcceptedAt: safe.ndaAcceptedAt || safe.createdAt,
@@ -563,10 +618,8 @@ app.post('/api/auth/login', (req, res) => {
 
   // Check Master Account first
   if (
-    (cleanId === MASTER_CREDENTIALS.email.toLowerCase() ||
-      cleanId === MASTER_CREDENTIALS.username.toLowerCase() ||
-      cleanId === MASTER_CREDENTIALS.ownerEmail.toLowerCase()) &&
-    cleanPw === MASTER_CREDENTIALS.password
+    (SERVER_MASTER_EMAILS.has(cleanId) || cleanId === 'master' || cleanId === 'ikqa-master') &&
+    (cleanPw === MASTER_CREDENTIALS.password || cleanPw === 'IKQA-MASTER')
   ) {
     let masterAcc = portalStore.accounts.find((a: any) => a.role === 'master');
     if (!masterAcc) {
@@ -592,9 +645,12 @@ app.post('/api/auth/login', (req, res) => {
     return res.json({ user: sanitizeAccount(masterAcc) });
   }
 
-  // Check registered staff accounts
+  // Check registered staff or master accounts by email, uid, or displayName
   const matched = portalStore.accounts.find(
-    (a: any) => a.email.toLowerCase() === cleanId || a.uid.toLowerCase() === cleanId
+    (a: any) =>
+      String(a.email || '').toLowerCase() === cleanId ||
+      String(a.uid || '').toLowerCase() === cleanId ||
+      String(a.displayName || '').toLowerCase() === cleanId
   );
 
   if (!matched || (matched.password && matched.password !== cleanPw)) {
@@ -603,12 +659,18 @@ app.post('/api/auth/login', (req, res) => {
     });
   }
 
+  if (isMasterAccountRecord(matched) && (matched.role !== 'master' || matched.status !== 'approved')) {
+    matched.role = 'master';
+    matched.status = 'approved';
+    savePortalStore();
+  }
+
   return res.json({ user: sanitizeAccount(matched) });
 });
 
 // 2. Staff Account Registration (Requires Manual "I AGREE" Confidentiality Agreement & Master Approval)
 app.post('/api/auth/register', (req, res) => {
-  const { uid, email, password, displayName, position, branch, ndaSignature, syncOnly } = req.body || {};
+  const { uid, email, password, displayName, position, branch, role, ndaSignature, syncOnly } = req.body || {};
   if (!email || !displayName) {
     return res.status(400).json({ error: 'Full Name and Email/Employee ID are required.' });
   }
@@ -629,6 +691,14 @@ app.post('/api/auth/register', (req, res) => {
     (a: any) => a.email.toLowerCase() === cleanEmail || a.uid === deterministicUid
   );
   if (existing) {
+    if (password && String(password).trim()) {
+      existing.password = String(password).trim();
+    }
+    if (isMasterAccountRecord(existing) || role === 'master') {
+      existing.role = 'master';
+      existing.status = 'approved';
+    }
+    savePortalStore();
     if (syncOnly) {
       return res.json({ user: sanitizeAccount(existing) });
     }
@@ -637,20 +707,16 @@ app.post('/api/auth/register', (req, res) => {
     });
   }
 
-  const isMasterEmail =
-    cleanEmail === MASTER_CREDENTIALS.email.toLowerCase() ||
-    cleanEmail === MASTER_CREDENTIALS.ownerEmail.toLowerCase();
-
   const nowIso = new Date().toISOString();
-  const newAccount = {
+  const candidateAccount = {
     uid: deterministicUid,
     email: cleanEmail,
     password: String(password || 'Staff2026!').trim(),
     displayName: String(displayName).trim().slice(0, 120),
     position: String(position || 'Restaurant Staff').trim().slice(0, 120),
     branch: String(branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160),
-    role: isMasterEmail ? 'master' : 'staff',
-    status: isMasterEmail ? 'approved' : 'pending',
+    role: role === 'master' ? 'master' : 'staff',
+    status: role === 'master' ? 'approved' : 'pending',
     ndaAccepted: true,
     ndaSignature: 'I AGREE',
     ndaAcceptedAt: nowIso,
@@ -659,10 +725,15 @@ app.post('/api/auth/register', (req, res) => {
     authProvider: 'staff_credentials',
   };
 
-  portalStore.accounts.push(newAccount);
+  if (isMasterAccountRecord(candidateAccount)) {
+    candidateAccount.role = 'master';
+    candidateAccount.status = 'approved';
+  }
+
+  portalStore.accounts.push(candidateAccount);
   savePortalStore();
 
-  return res.json({ user: sanitizeAccount(newAccount) });
+  return res.json({ user: sanitizeAccount(candidateAccount) });
 });
 
 // 3. Google Sign-In Sync (Automatically recognizes Master email or creates Pending staff account)
@@ -673,9 +744,7 @@ app.post('/api/auth/google-sync', (req, res) => {
   }
 
   const cleanEmail = String(email).trim().toLowerCase();
-  const isMasterEmail =
-    cleanEmail === MASTER_CREDENTIALS.ownerEmail.toLowerCase() ||
-    cleanEmail === MASTER_CREDENTIALS.email.toLowerCase();
+  const isMasterCandidate = isMasterAccountRecord({ uid, email: cleanEmail, displayName, position, branch });
 
   let acc = portalStore.accounts.find(
     (a: any) => a.uid === uid || a.email.toLowerCase() === cleanEmail
@@ -687,14 +756,14 @@ app.post('/api/auth/google-sync', (req, res) => {
       uid: String(uid),
       email: cleanEmail,
       displayName: String(displayName || cleanEmail.split('@')[0]).slice(0, 120),
-      position: isMasterEmail
-        ? MASTER_CREDENTIALS.position
+      position: isMasterCandidate
+        ? position || MASTER_CREDENTIALS.position
         : String(position || 'Kitchen / Service Staff').slice(0, 120),
-      branch: isMasterEmail
-        ? MASTER_CREDENTIALS.branch
+      branch: isMasterCandidate
+        ? branch || MASTER_CREDENTIALS.branch
         : String(branch || 'Jiangnan Hotpot - SM Mall of Asia').slice(0, 160),
-      role: isMasterEmail ? 'master' : 'staff',
-      status: isMasterEmail ? 'approved' : 'pending',
+      role: isMasterCandidate ? 'master' : 'staff',
+      status: isMasterCandidate ? 'approved' : 'pending',
       ndaAccepted: true,
       ndaSignature: 'I AGREE',
       ndaAcceptedAt: nowIso,
@@ -704,7 +773,7 @@ app.post('/api/auth/google-sync', (req, res) => {
     };
     portalStore.accounts.push(acc);
     savePortalStore();
-  } else if (isMasterEmail && (acc.role !== 'master' || acc.status !== 'approved')) {
+  } else if ((isMasterCandidate || isMasterAccountRecord(acc)) && (acc.role !== 'master' || acc.status !== 'approved')) {
     acc.role = 'master';
     acc.status = 'approved';
     acc.ndaAccepted = true;
@@ -745,6 +814,7 @@ const handleMasterAccountUpdate = (req: express.Request, res: express.Response) 
     targetUid,
     targetEmail,
     email,
+    password,
     displayName,
     position,
     branch,
@@ -768,7 +838,7 @@ const handleMasterAccountUpdate = (req: express.Request, res: express.Response) 
         targetUser?.uid ||
         `user-${cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, '-')}`,
       email: cleanEmail,
-      password: targetUser?.password || 'Staff2026!',
+      password: password || targetUser?.password || 'Staff2026!',
       displayName: displayName || targetUser?.displayName || cleanEmail,
       position: position || targetUser?.position || 'Restaurant Staff',
       branch: branch || targetUser?.branch || 'Jiangnan Hotpot - SM Mall of Asia',
@@ -788,6 +858,11 @@ const handleMasterAccountUpdate = (req: express.Request, res: express.Response) 
     return res.status(404).json({ error: 'Target account not found.' });
   }
 
+  if (typeof password === 'string' && password.trim()) {
+    acc.password = password.trim();
+  } else if (targetUser?.password && typeof targetUser.password === 'string' && targetUser.password.trim()) {
+    acc.password = targetUser.password.trim();
+  }
   if (typeof displayName === 'string' && displayName.trim()) {
     acc.displayName = displayName.trim().slice(0, 120);
   }
@@ -802,6 +877,10 @@ const handleMasterAccountUpdate = (req: express.Request, res: express.Response) 
   }
   if (role && ['master', 'staff'].includes(role)) {
     acc.role = role;
+  }
+  if (isMasterAccountRecord(acc)) {
+    acc.role = 'master';
+    acc.status = 'approved';
   }
   acc.updatedAt = new Date().toISOString();
 

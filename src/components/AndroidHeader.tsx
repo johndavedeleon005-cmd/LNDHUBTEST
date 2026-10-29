@@ -17,8 +17,12 @@ import {
   Crown,
   LogOut,
   UserCheck,
+  Award,
+  Upload,
+  KeyRound,
 } from 'lucide-react';
 import { FoodSafetyDoc, PortalUser } from '../types/foodSafety';
+import { isMasterAccountUser } from '../services/authAndUploadService';
 
 interface AndroidHeaderProps {
   onSearchClick: () => void;
@@ -33,6 +37,10 @@ interface AndroidHeaderProps {
   onSelectDoc?: (doc: FoodSafetyDoc) => void;
   currentUser?: PortalUser | null;
   onOpenMasterHub?: () => void;
+  onOpenMasterHubSection?: (
+    section: 'certificates' | 'approvals' | 'uploader' | 'credentials'
+  ) => void;
+  activeTab?: string;
   onOpenAuthModal?: () => void;
   onSignOut?: () => void;
   pendingApprovalsCount?: number;
@@ -51,10 +59,13 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
   onSelectDoc,
   currentUser = null,
   onOpenMasterHub,
+  onOpenMasterHubSection,
+  activeTab,
   onOpenAuthModal,
   onSignOut,
   pendingApprovalsCount = 0,
 }) => {
+  const isMaster = isMasterAccountUser(currentUser);
   const [time, setTime] = useState<string>('');
   const [isQuickSearchOpen, setIsQuickSearchOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState('');
@@ -281,14 +292,14 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
           </button>
 
           {/* Master Account Hub Button or Account Status */}
-          {currentUser?.role === 'master' && onOpenMasterHub && (
+          {isMaster && onOpenMasterHub && (
             <button
               onClick={onOpenMasterHub}
-              title="Open Master Account Upload & Staff Approval Hub"
-              className="relative flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 text-xs font-black shadow-md active:scale-95 transition-all cursor-pointer"
+              title="Open Master Account Upload, Certificate Verification & Staff Approval Hub"
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 text-xs font-black shadow-md shadow-amber-500/20 ring-1 ring-amber-200/60 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Crown className="w-3.5 h-3.5 text-slate-950" />
-              <span className="hidden sm:inline">Master Hub</span>
+              <Crown className="w-3.5 h-3.5 text-slate-950 shrink-0" />
+              <span>Master Hub</span>
               {pendingApprovalsCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-red-600 text-white text-[10px] font-black">
                   {pendingApprovalsCount}
@@ -307,7 +318,7 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
               <span className="max-w-[100px] truncate hidden sm:inline">
                 {currentUser.displayName.split(' ')[0]}
               </span>
-              <span className="sm:hidden">Log In</span>
+              <span className="sm:hidden">Account</span>
             </button>
           )}
 
@@ -318,7 +329,7 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
               title={`Log out (${currentUser.email})`}
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span>Log Out</span>
+              <span className="hidden sm:inline">Log Out</span>
             </button>
           ) : (
             onOpenAuthModal && (
@@ -341,6 +352,85 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Persistent Master Account Control Bar (Always Visible for Master Accounts Across All Tabs) */}
+      {isMaster && onOpenMasterHub && (
+        <div className="px-4 py-1.5 bg-gradient-to-r from-amber-950/95 via-slate-900 to-amber-950/90 border-t border-amber-500/40 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+              <Crown className="w-3 h-3 text-slate-950" />
+              <span>Master Account</span>
+            </span>
+            <span className="text-[11px] font-bold text-amber-200 hidden md:inline truncate max-w-[200px]">
+              {currentUser?.displayName}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={onOpenMasterHub}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer ${
+                activeTab === 'master'
+                  ? 'bg-amber-400 text-slate-950 shadow-sm'
+                  : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/50'
+              }`}
+            >
+              <Crown className="w-3 h-3" />
+              <span>Master Hub</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onOpenMasterHubSection ? onOpenMasterHubSection('certificates') : onOpenMasterHub()
+              }
+              className="px-2.5 py-1 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-600/50 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <Award className="w-3 h-3 text-emerald-400" />
+              <span>Verify Certificates</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onOpenMasterHubSection ? onOpenMasterHubSection('approvals') : onOpenMasterHub()
+              }
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <UserCheck className="w-3 h-3 text-amber-400" />
+              <span>Staff Approvals</span>
+              {pendingApprovalsCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-red-600 text-white text-[9px] font-black">
+                  {pendingApprovalsCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onOpenMasterHubSection ? onOpenMasterHubSection('uploader') : onOpenMasterHub()
+              }
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <Upload className="w-3 h-3 text-amber-400" />
+              <span>Upload SOPs &amp; Checklists</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onOpenMasterHubSection ? onOpenMasterHubSection('credentials') : onOpenMasterHub()
+              }
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <KeyRound className="w-3 h-3 text-amber-400" />
+              <span className="hidden sm:inline">Master Credentials</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Expandable Quick-Access Related Documents Search Bar & Live Results */}
       {isQuickSearchOpen && (

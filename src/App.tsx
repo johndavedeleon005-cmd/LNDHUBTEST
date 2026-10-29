@@ -27,6 +27,8 @@ import {
   updateAccountApprovalStatus,
   checkCurrentAccountStatus,
   saveDocumentsToLocalStorage,
+  isMasterAccountUser,
+  normalizePortalUser,
 } from './services/authAndUploadService';
 import {
   Search,
@@ -59,6 +61,11 @@ export default function App() {
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
   const [pendingAccountsList, setPendingAccountsList] = useState<PortalUser[]>([]);
   const [initialCertVerifyCode, setInitialCertVerifyCode] = useState<string | null>(null);
+  const [initialMasterSection, setInitialMasterSection] = useState<
+    'certificates' | 'approvals' | 'uploader' | 'credentials' | null
+  >(null);
+
+  const isMasterAccount = isMasterAccountUser(currentUser);
 
   // Documents state (persisted with any custom added docs)
   const [documents, setDocuments] = useState<FoodSafetyDoc[]>(() => {
@@ -194,23 +201,23 @@ export default function App() {
   }, []);
 
   const loadPendingApprovals = useCallback(async () => {
-    if (currentUser?.role !== 'master') {
+    if (!isMasterAccount) {
       setPendingApprovalsCount(0);
       setPendingAccountsList([]);
       return;
     }
     try {
       const accounts = await fetchAllPortalAccounts();
-      const pending = accounts.filter((a) => a.role !== 'master' && a.status === 'pending');
+      const pending = accounts.filter((a) => !isMasterAccountUser(a) && a.status === 'pending');
       setPendingApprovalsCount(pending.length);
       setPendingAccountsList(pending);
     } catch {
       // ignore
     }
-  }, [currentUser?.role]);
+  }, [isMasterAccount]);
 
   const isApprovedUser =
-    !!currentUser && (currentUser.role === 'master' || currentUser.status === 'approved');
+    !!currentUser && (isMasterAccount || currentUser.status === 'approved');
 
   useEffect(() => {
     if (isApprovedUser) {
@@ -225,8 +232,8 @@ export default function App() {
       return;
     }
     const unsub = subscribeToPortalAccounts((accounts) => {
-      if (currentUser.role === 'master') {
-        const pending = accounts.filter((a) => a.role !== 'master' && a.status === 'pending');
+      if (isMasterAccountUser(currentUser)) {
+        const pending = accounts.filter((a) => !isMasterAccountUser(a) && a.status === 'pending');
         setPendingApprovalsCount(pending.length);
         setPendingAccountsList(pending);
       } else {
@@ -234,32 +241,47 @@ export default function App() {
         setPendingAccountsList([]);
       }
 
-      // If the Master Account updated this user's Name, Position, Branch, or Status in the Hub, sync it immediately
+      // If the Master Account updated this user's Name, Position, Branch, Role, or Status in the Hub, sync it immediately
       const matchedSelf = accounts.find(
         (a) =>
           a.uid === currentUser.uid ||
           a.email.toLowerCase() === currentUser.email.toLowerCase()
       );
-      if (
-        matchedSelf &&
-        (matchedSelf.displayName !== currentUser.displayName ||
-          matchedSelf.position !== currentUser.position ||
-          matchedSelf.branch !== currentUser.branch ||
-          matchedSelf.status !== currentUser.status ||
-          matchedSelf.role !== currentUser.role)
-      ) {
-        setCurrentUser((prev) =>
-          prev
-            ? {
-                ...prev,
-                displayName: matchedSelf.displayName,
-                position: matchedSelf.position,
-                branch: matchedSelf.branch,
-                status: matchedSelf.status,
-                role: matchedSelf.role,
-              }
-            : prev
-        );
+      if (matchedSelf) {
+        const normalizedSelf = normalizePortalUser({
+          ...matchedSelf,
+          role:
+            currentUser.role === 'master' || matchedSelf.role === 'master'
+              ? 'master'
+              : matchedSelf.role,
+          status:
+            currentUser.role === 'master' ||
+            matchedSelf.role === 'master' ||
+            currentUser.status === 'approved' ||
+            matchedSelf.status === 'approved'
+              ? 'approved'
+              : matchedSelf.status,
+        });
+        if (
+          normalizedSelf.displayName !== currentUser.displayName ||
+          normalizedSelf.position !== currentUser.position ||
+          normalizedSelf.branch !== currentUser.branch ||
+          normalizedSelf.status !== currentUser.status ||
+          normalizedSelf.role !== currentUser.role
+        ) {
+          setCurrentUser((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  displayName: normalizedSelf.displayName,
+                  position: normalizedSelf.position,
+                  branch: normalizedSelf.branch,
+                  status: normalizedSelf.status,
+                  role: normalizedSelf.role,
+                }
+              : prev
+          );
+        }
       }
     });
     return () => unsub();
@@ -273,18 +295,22 @@ export default function App() {
     currentUser?.status,
   ]);
 
-  // Verify user approval & profile status on mount
+  // Verify user approval, role & profile status on mount
   useEffect(() => {
     if (currentUser) {
+      if (isMasterAccountUser(currentUser) && (currentUser.role !== 'master' || currentUser.status !== 'approved')) {
+        setCurrentUser(normalizePortalUser(currentUser));
+      }
       checkCurrentAccountStatus(currentUser).then((updated) => {
         if (
           updated &&
           (updated.status !== currentUser.status ||
+            updated.role !== currentUser.role ||
             updated.displayName !== currentUser.displayName ||
             updated.position !== currentUser.position ||
             updated.branch !== currentUser.branch)
         ) {
-          setCurrentUser(updated);
+          setCurrentUser(normalizePortalUser(updated));
         }
       });
     }
@@ -330,10 +356,11 @@ export default function App() {
 
   // Handlers
   const handleAuthenticated = (user: PortalUser) => {
-    setCurrentUser(user);
-    setStaffName(user.displayName);
-    setStaffPosition(user.position);
-    setStaffBranch(user.branch);
+    const normalized = normalizePortalUser(user);
+    setCurrentUser(normalized);
+    setStaffName(normalized.displayName);
+    setStaffPosition(normalized.position);
+    setStaffBranch(normalized.branch);
     setIsAuthModalOpen(false);
     loadPortalCustomDocs();
   };
@@ -504,8 +531,14 @@ export default function App() {
           activeDoc={selectedDoc}
           onSelectDoc={(d) => handleInitiateViewDoc(d)}
           currentUser={currentUser}
+          activeTab={activeTab}
           onOpenMasterHub={() => {
             setSelectedDoc(null);
+            setActiveTab('master');
+          }}
+          onOpenMasterHubSection={(section) => {
+            setSelectedDoc(null);
+            setInitialMasterSection(section);
             setActiveTab('master');
           }}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
@@ -551,15 +584,28 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    {currentUser.role === 'master' ? (
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('master')}
-                        className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                      >
-                        <Crown className="w-3 h-3 text-amber-400" />
-                        <span>Edit Staff Names/Positions in Hub</span>
-                      </button>
+                    {isMasterAccount ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('master')}
+                          className="px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 text-[11px] font-black flex items-center gap-1 shadow-sm cursor-pointer"
+                        >
+                          <Crown className="w-3.5 h-3.5 text-slate-950" />
+                          <span>Open Master Hub</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInitialMasterSection('approvals');
+                            setActiveTab('master');
+                          }}
+                          className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <UserCheck className="w-3 h-3 text-amber-400" />
+                          <span>Edit Staff Names/Positions in Hub</span>
+                        </button>
+                      </>
                     ) : (
                       <span className="text-[10px] text-slate-400 font-mono hidden lg:inline">
                         Only Master Account can modify Name &amp; Position
@@ -588,7 +634,7 @@ export default function App() {
               )}
 
               {/* LIVE INCOMING STAFF ACCOUNT APPROVAL REQUESTS BANNER FOR MASTER ACCOUNT */}
-              {currentUser?.role === 'master' &&
+              {isMasterAccount &&
                 pendingAccountsList.length > 0 &&
                 activeTab !== 'master' && (
                   <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/80 border-2 border-amber-500/70 rounded-3xl p-4 shadow-xl space-y-3">
@@ -608,7 +654,10 @@ export default function App() {
                         </div>
                       </div>
                       <button
-                        onClick={() => setActiveTab('master')}
+                        onClick={() => {
+                          setInitialMasterSection('approvals');
+                          setActiveTab('master');
+                        }}
                         className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-500/40 text-amber-300 font-bold text-xs cursor-pointer self-start sm:self-center"
                       >
                         View All in Master Hub ({pendingAccountsList.length})
@@ -647,7 +696,7 @@ export default function App() {
                               onClick={async () => {
                                 const updated = await updateAccountApprovalStatus(reqAcc, 'approved');
                                 const rem = updated.filter(
-                                  (a) => a.role !== 'master' && a.status === 'pending'
+                                  (a) => !isMasterAccountUser(a) && a.status === 'pending'
                                 );
                                 setPendingApprovalsCount(rem.length);
                                 setPendingAccountsList(rem);
@@ -661,7 +710,7 @@ export default function App() {
                               onClick={async () => {
                                 const updated = await updateAccountApprovalStatus(reqAcc, 'rejected');
                                 const rem = updated.filter(
-                                  (a) => a.role !== 'master' && a.status === 'pending'
+                                  (a) => !isMasterAccountUser(a) && a.status === 'pending'
                                 );
                                 setPendingApprovalsCount(rem.length);
                                 setPendingAccountsList(rem);
@@ -698,7 +747,7 @@ export default function App() {
                               <Flame className="w-3 h-3 text-amber-400 fill-amber-400" />
                               Imperial Kitchen Group Inc.
                             </span>
-                            {currentUser?.role === 'master' && (
+                            {isMasterAccount && (
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/50 text-[10px] font-black">
                                 <Crown className="w-3 h-3 text-amber-400" />
                                 MASTER ACCOUNT ACTIVE
@@ -715,7 +764,7 @@ export default function App() {
                       </div>
 
                       <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
-                        {currentUser?.role === 'master' && (
+                        {isMasterAccount && (
                           <button
                             onClick={() => setActiveTab('master')}
                             className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 text-xs font-black shadow-lg active:scale-95 transition-all cursor-pointer"
@@ -740,7 +789,7 @@ export default function App() {
                     </div>
 
                     {/* Master Account Quick Action Banner when signed in as Master */}
-                    {currentUser?.role === 'master' && (
+                    {isMasterAccount && (
                       <div className="mt-3 pt-3 border-t border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-amber-950/30 p-3 rounded-2xl border border-amber-500/40">
                         <div className="flex items-center gap-2.5">
                           <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center shrink-0">
@@ -758,7 +807,7 @@ export default function App() {
                               )}
                             </div>
                             <p className="text-[11px] text-amber-200/90">
-                              Upload SOPs, Policies, Guides &amp; Station Checklists (auto-synced to AI &amp; Games) or approve staff sign-ups.
+                              Upload SOPs, Policies, Guides &amp; Station Checklists, verify training certificates, or approve staff sign-ups.
                             </p>
                           </div>
                         </div>
@@ -1141,7 +1190,7 @@ export default function App() {
                   staffBranch={staffBranch}
                   onOpenDoc={(d) => handleInitiateViewDoc(d)}
                   onOpenWelcomeModal={() => setIsWelcomeOpen(true)}
-                  isMasterAccount={currentUser?.role === 'master'}
+                  isMasterAccount={isMasterAccount}
                   onOpenMasterHub={(serialCode) => {
                     if (serialCode) {
                       setInitialCertVerifyCode(serialCode);
@@ -1172,6 +1221,8 @@ export default function App() {
                   onDeleteCustomDoc={handleDocumentDeleted}
                   initialCertVerifyCode={initialCertVerifyCode}
                   onClearInitialCertVerifyCode={() => setInitialCertVerifyCode(null)}
+                  initialSection={initialMasterSection}
+                  onClearInitialSection={() => setInitialMasterSection(null)}
                   onOpenDoc={(d) => handleInitiateViewDoc(d)}
                   onLaunchGameWithDoc={(mode, doc) => {
                     setFocusedGameDoc(doc);
@@ -1191,12 +1242,12 @@ export default function App() {
                     ) {
                       setCurrentUser((prev) =>
                         prev
-                          ? {
+                          ? normalizePortalUser({
                               ...prev,
                               displayName: updatedAcc.displayName,
                               position: updatedAcc.position,
                               branch: updatedAcc.branch,
-                            }
+                            })
                           : prev
                       );
                       setStaffName(updatedAcc.displayName);
@@ -1218,7 +1269,7 @@ export default function App() {
             setActiveTab(tab);
           }}
           totalDocsCount={documents.length}
-          isMasterAccount={currentUser?.role === 'master'}
+          isMasterAccount={isMasterAccount}
           pendingApprovalsCount={pendingApprovalsCount}
         />
 

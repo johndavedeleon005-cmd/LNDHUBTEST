@@ -169,18 +169,122 @@ const DEFAULT_SEED_ACCOUNTS: (PortalUser & { password?: string })[] = [
   },
 ];
 
+export const MASTER_EMAIL_WHITELIST = new Set([
+  MASTER_ACCOUNT_DETAILS.email.toLowerCase(),
+  MASTER_ACCOUNT_DETAILS.username.toLowerCase(),
+  MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase(),
+  'deleonjohndave986@gmail.com',
+  'admin@jiangnanhotpot.com',
+  'ld@jiangnanhotpot.com',
+  'joy.bernardo@jiangnanhotpot.com',
+  'lany.nemenzo@jiangnanhotpot.com',
+  'dice.torralba@jiangnanhotpot.com',
+]);
+
+export const MASTER_NAME_WHITELIST = new Set([
+  'john dave de leon',
+  'john dave de leon (master admin)',
+  'joy bernardo',
+  'lany ann nemenzo',
+  'dice divine torralba',
+]);
+
+export function isMasterAccountUser(user?: Partial<PortalUser> | null): boolean {
+  if (!user) return false;
+  if (user.role === 'master') return true;
+  if (user.uid === 'master-admin-001') return true;
+
+  const cleanEmail = String(user.email || '').trim().toLowerCase();
+  if (
+    cleanEmail &&
+    (MASTER_EMAIL_WHITELIST.has(cleanEmail) ||
+      cleanEmail.startsWith('master@') ||
+      cleanEmail.startsWith('admin@'))
+  ) {
+    return true;
+  }
+
+  const rawName = String(user.displayName || '').trim().toLowerCase();
+  const strippedName = rawName.replace(/\s*\([^)]*\)\s*/g, '').trim();
+  if (
+    rawName &&
+    (MASTER_NAME_WHITELIST.has(rawName) ||
+      MASTER_NAME_WHITELIST.has(strippedName) ||
+      rawName.includes('master admin') ||
+      rawName.includes('master account'))
+  ) {
+    return true;
+  }
+
+  const cleanPos = String(user.position || '').trim().toLowerCase();
+  if (
+    cleanPos &&
+    (cleanPos.includes('master account') ||
+      cleanPos.includes('master admin') ||
+      cleanPos.includes('l&d specialist') ||
+      cleanPos.includes('l&d manager') ||
+      cleanPos.includes('learning and development') ||
+      cleanPos.includes('learning & development') ||
+      cleanPos.includes('fsco'))
+  ) {
+    return true;
+  }
+
+  const cleanBranch = String(user.branch || '').trim().toLowerCase();
+  if (cleanBranch && cleanBranch.includes('l&d department')) {
+    return true;
+  }
+
+  return false;
+}
+
+export function normalizePortalUser<T extends PortalUser & { password?: string }>(user: T): T {
+  let hasLocalMasterRole = false;
+  try {
+    const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const cleanEmail = String(user.email || '').trim().toLowerCase();
+        hasLocalMasterRole = parsed.some(
+          (a: any) =>
+            a &&
+            a.role === 'master' &&
+            (a.uid === user.uid ||
+              (cleanEmail && String(a.email || '').trim().toLowerCase() === cleanEmail))
+        );
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  if (isMasterAccountUser(user) || hasLocalMasterRole) {
+    return {
+      ...user,
+      role: 'master',
+      status: 'approved',
+      ndaAccepted: true,
+      ndaSignature: user.ndaSignature || 'I AGREE',
+    };
+  }
+  return user;
+}
+
 export function getLocalAccounts(): (PortalUser & { password?: string })[] {
   try {
     const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((a: any) => ({
-          ...a,
-          ndaAccepted: a.ndaAccepted ?? true,
-          ndaSignature: a.ndaSignature || 'I AGREE',
-          ndaAcceptedAt: a.ndaAcceptedAt || a.createdAt || new Date().toISOString(),
-        }));
+        return parsed.map((a: any) =>
+          normalizePortalUser({
+            ...a,
+            ndaAccepted: a.ndaAccepted ?? true,
+            ndaSignature: a.ndaSignature || 'I AGREE',
+            ndaAcceptedAt: a.ndaAcceptedAt || a.createdAt || new Date().toISOString(),
+          })
+        );
       }
     }
   } catch {
@@ -191,7 +295,10 @@ export function getLocalAccounts(): (PortalUser & { password?: string })[] {
 
 export function saveLocalAccounts(accounts: (PortalUser & { password?: string })[]) {
   try {
-    localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
+    localStorage.setItem(
+      LOCAL_ACCOUNTS_KEY,
+      JSON.stringify(accounts.map((a) => normalizePortalUser(a)))
+    );
   } catch {
     // ignore
   }
@@ -200,7 +307,9 @@ export function saveLocalAccounts(accounts: (PortalUser & { password?: string })
 export function getSavedSessionUser(): PortalUser | null {
   try {
     const raw = localStorage.getItem(LOCAL_SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed ? normalizePortalUser(parsed) : null;
   } catch {
     return null;
   }
@@ -209,7 +318,7 @@ export function getSavedSessionUser(): PortalUser | null {
 export function saveSessionUser(user: PortalUser | null) {
   try {
     if (user) {
-      localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(user));
+      localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(normalizePortalUser(user)));
     } else {
       localStorage.removeItem(LOCAL_SESSION_KEY);
     }
@@ -229,18 +338,23 @@ function resolveBestAccountStatus(
 async function syncAccountToFirestore(
   user: PortalUser & { password?: string }
 ): Promise<void> {
-  const cleanEmail = user.email.trim().toLowerCase().slice(0, 254);
+  const normalized = normalizePortalUser(user);
+  const cleanEmail = normalized.email.trim().toLowerCase().slice(0, 254);
   const detId = toDeterministicUid(cleanEmail);
-  const rawUid = (user.uid || detId).slice(0, 128);
+  const rawUid = (normalized.uid || detId).slice(0, 128);
   const nowIso = new Date().toISOString();
 
-  const roleVal = user.role === 'master' ? 'master' : 'staff';
+  const roleVal = normalized.role === 'master' ? 'master' : 'staff';
   const statusVal =
-    user.status === 'approved' || user.status === 'rejected' ? user.status : 'pending';
-  const displayNameVal = (user.displayName || cleanEmail).trim().slice(0, 120);
-  const positionVal = (user.position || 'Kitchen / Service Staff').trim().slice(0, 120);
-  const branchVal = (user.branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160);
-  const ndaAcceptedAtVal = (user.ndaAcceptedAt || user.createdAt || nowIso).slice(0, 64);
+    roleVal === 'master'
+      ? 'approved'
+      : normalized.status === 'approved' || normalized.status === 'rejected'
+      ? normalized.status
+      : 'pending';
+  const displayNameVal = (normalized.displayName || cleanEmail).trim().slice(0, 120);
+  const positionVal = (normalized.position || 'Kitchen / Service Staff').trim().slice(0, 120);
+  const branchVal = (normalized.branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160);
+  const ndaAcceptedAtVal = (normalized.ndaAcceptedAt || normalized.createdAt || nowIso).slice(0, 64);
 
   const targetIds = new Set<string>([rawUid, detId].filter(Boolean));
 
@@ -267,16 +381,25 @@ async function syncAccountToFirestore(
       const docRef = doc(db, 'users', cid);
       const existingSnap = await getDoc(docRef);
       if (existingSnap.exists()) {
+        const existingData = existingSnap.data();
         const updatePayload: Record<string, any> = {
+          uid: existingData.uid || cid,
+          email: existingData.email || cleanEmail,
           displayName: displayNameVal,
           position: positionVal,
           branch: branchVal,
           role: roleVal,
           status: statusVal,
+          ndaAccepted: true,
+          ndaSignature: 'I AGREE',
+          ndaAcceptedAt: existingData.ndaAcceptedAt || ndaAcceptedAtVal,
           updatedAt: serverTimestamp(),
         };
-        if (user.password) {
-          updatePayload.credentialPass = user.password.slice(0, 128);
+        if (!existingData.createdAt || typeof existingData.createdAt === 'string') {
+          updatePayload.createdAt = serverTimestamp();
+        }
+        if (normalized.password) {
+          updatePayload.credentialPass = normalized.password.slice(0, 128);
         }
         await updateDoc(docRef, updatePayload);
       } else {
@@ -294,8 +417,8 @@ async function syncAccountToFirestore(
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
-        if (user.password) {
-          createPayload.credentialPass = user.password.slice(0, 128);
+        if (normalized.password) {
+          createPayload.credentialPass = normalized.password.slice(0, 128);
         }
         await setDoc(docRef, createPayload);
       }
@@ -315,8 +438,8 @@ async function syncAccountToFirestore(
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
-        if (user.password) {
-          fallbackPayload.credentialPass = user.password.slice(0, 128);
+        if (normalized.password) {
+          fallbackPayload.credentialPass = normalized.password.slice(0, 128);
         }
         await setDoc(doc(db, 'users', cid), fallbackPayload, { merge: true });
       } catch {
@@ -337,12 +460,16 @@ export async function signInWithCredentials(
   if (
     (cleanId === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
       cleanId === MASTER_ACCOUNT_DETAILS.username.toLowerCase() ||
-      cleanId === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase()) &&
+      cleanId === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase() ||
+      MASTER_EMAIL_WHITELIST.has(cleanId)) &&
     cleanPw === MASTER_ACCOUNT_DETAILS.password
   ) {
     const masterUser: PortalUser = {
       uid: 'master-admin-001',
-      email: MASTER_ACCOUNT_DETAILS.email,
+      email:
+        cleanId.includes('@') && cleanId !== MASTER_ACCOUNT_DETAILS.email.toLowerCase()
+          ? cleanId
+          : MASTER_ACCOUNT_DETAILS.email,
       displayName: MASTER_ACCOUNT_DETAILS.displayName,
       position: MASTER_ACCOUNT_DETAILS.position,
       branch: MASTER_ACCOUNT_DETAILS.branch,
@@ -369,7 +496,7 @@ export async function signInWithCredentials(
       const d = snap.data();
       if (!d.credentialPass || d.credentialPass === cleanPw) {
         const nowIso = new Date().toISOString();
-        matchedUser = {
+        matchedUser = normalizePortalUser({
           uid: d.uid || detUid,
           email: d.email || cleanId,
           displayName: d.displayName || cleanId,
@@ -384,7 +511,7 @@ export async function signInWithCredentials(
           createdAt: nowIso,
           updatedAt: nowIso,
           authProvider: 'staff_credentials',
-        };
+        });
       }
     }
   } catch {
@@ -401,17 +528,19 @@ export async function signInWithCredentials(
     if (res && res.ok) {
       const data = await res.json();
       if (data.user) {
-        matchedUser = matchedUser
-          ? {
-              ...matchedUser,
-              ...data.user,
-              status: resolveBestAccountStatus(matchedUser.status, data.user.status),
-              role:
-                matchedUser.role === 'master' || data.user.role === 'master'
-                  ? 'master'
-                  : 'staff',
-            }
-          : data.user;
+        matchedUser = normalizePortalUser(
+          matchedUser
+            ? {
+                ...matchedUser,
+                ...data.user,
+                status: resolveBestAccountStatus(matchedUser.status, data.user.status),
+                role:
+                  matchedUser.role === 'master' || data.user.role === 'master'
+                    ? 'master'
+                    : 'staff',
+              }
+            : data.user
+        );
       }
     }
   } catch {
@@ -421,21 +550,26 @@ export async function signInWithCredentials(
   // 4. Local fallback / merge check
   const localAccs = getLocalAccounts();
   const matchedLocal = localAccs.find(
-    (a) => a.email.toLowerCase() === cleanId || a.uid.toLowerCase() === cleanId
+    (a) =>
+      a.email.toLowerCase() === cleanId ||
+      a.uid.toLowerCase() === cleanId ||
+      a.displayName.toLowerCase() === cleanId
   );
   if (matchedLocal && (!matchedLocal.password || matchedLocal.password === cleanPw)) {
     const { password: _pw, ...safeLocal } = matchedLocal;
-    matchedUser = matchedUser
-      ? {
-          ...matchedUser,
-          ...safeLocal,
-          status: resolveBestAccountStatus(matchedUser.status, safeLocal.status),
-          role:
-            matchedUser.role === 'master' || safeLocal.role === 'master'
-              ? 'master'
-              : 'staff',
-        }
-      : safeLocal;
+    matchedUser = normalizePortalUser(
+      matchedUser
+        ? {
+            ...matchedUser,
+            ...safeLocal,
+            status: resolveBestAccountStatus(matchedUser.status, safeLocal.status),
+            role:
+              matchedUser.role === 'master' || safeLocal.role === 'master'
+                ? 'master'
+                : 'staff',
+          }
+        : safeLocal
+    );
   }
 
   if (!matchedUser) {
@@ -456,6 +590,7 @@ export async function registerStaffAccount(params: {
   displayName: string;
   position: string;
   branch: string;
+  role?: 'master' | 'staff';
   ndaSignature?: string;
   preserveCurrentSession?: boolean;
 }): Promise<PortalUser> {
@@ -467,39 +602,54 @@ export async function registerStaffAccount(params: {
   const cleanEmail = params.email.trim().toLowerCase();
   const cleanPw = params.password.trim();
   const isMaster =
-    cleanEmail === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
-    cleanEmail === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase();
+    params.role === 'master' ||
+    isMasterAccountUser({
+      email: cleanEmail,
+      displayName: params.displayName,
+      position: params.position,
+      branch: params.branch,
+      role: params.role,
+    });
 
   const deterministicUid = toDeterministicUid(cleanEmail);
   const nowIso = new Date().toISOString();
 
-  // Check if account already exists in local storage or Firestore as approved so we never downgrade an approved account
+  // Check if account already exists in local storage or Firestore as approved/master so we never downgrade
   const localAccs = getLocalAccounts();
   const existingIdx = localAccs.findIndex(
     (a) => a.email.toLowerCase() === cleanEmail || a.uid === deterministicUid
   );
   let priorStatus: 'pending' | 'approved' | 'rejected' = isMaster ? 'approved' : 'pending';
-  if (existingIdx >= 0 && localAccs[existingIdx].status === 'approved') {
-    priorStatus = 'approved';
+  let priorRole: 'master' | 'staff' = isMaster ? 'master' : 'staff';
+  if (existingIdx >= 0) {
+    if (localAccs[existingIdx].status === 'approved') priorStatus = 'approved';
+    if (localAccs[existingIdx].role === 'master') {
+      priorRole = 'master';
+      priorStatus = 'approved';
+    }
   }
 
   try {
     const snap = await getDoc(doc(db, 'users', deterministicUid));
-    if (snap.exists() && snap.data()?.status === 'approved') {
-      priorStatus = 'approved';
+    if (snap.exists()) {
+      if (snap.data()?.status === 'approved') priorStatus = 'approved';
+      if (snap.data()?.role === 'master') {
+        priorRole = 'master';
+        priorStatus = 'approved';
+      }
     }
   } catch {
     // ignore
   }
 
-  const newEntry: PortalUser & { password?: string } = {
+  const newEntry: PortalUser & { password?: string } = normalizePortalUser({
     uid: deterministicUid,
     email: cleanEmail,
     password: cleanPw,
     displayName: params.displayName.trim().slice(0, 120),
     position: (params.position || 'Kitchen / Service Staff').trim().slice(0, 120),
     branch: (params.branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160),
-    role: isMaster ? 'master' : 'staff',
+    role: priorRole,
     status: priorStatus,
     ndaAccepted: true,
     ndaSignature: 'I AGREE',
@@ -507,15 +657,19 @@ export async function registerStaffAccount(params: {
     createdAt: nowIso,
     updatedAt: nowIso,
     authProvider: 'staff_credentials',
-  };
+  });
 
   // 1. Save to LocalStorage and broadcast across tabs
   if (existingIdx >= 0) {
-    localAccs[existingIdx] = {
+    localAccs[existingIdx] = normalizePortalUser({
       ...localAccs[existingIdx],
       ...newEntry,
+      role:
+        localAccs[existingIdx].role === 'master' || newEntry.role === 'master'
+          ? 'master'
+          : 'staff',
       status: resolveBestAccountStatus(localAccs[existingIdx].status, newEntry.status),
-    };
+    });
   } else {
     localAccs.push(newEntry);
   }
@@ -532,6 +686,8 @@ export async function registerStaffAccount(params: {
       body: JSON.stringify({
         ...params,
         uid: deterministicUid,
+        role: newEntry.role,
+        status: newEntry.status,
         ndaSignature: 'I AGREE',
         syncOnly: true,
       }),
@@ -539,10 +695,12 @@ export async function registerStaffAccount(params: {
     if (res && res.ok) {
       const data = await res.json();
       if (data.user) {
-        const mergedUser: PortalUser = {
+        const mergedUser: PortalUser = normalizePortalUser({
           ...data.user,
+          role:
+            newEntry.role === 'master' || data.user.role === 'master' ? 'master' : 'staff',
           status: resolveBestAccountStatus(newEntry.status, data.user.status),
-        };
+        });
         broadcastAccountSync();
         if (!params.preserveCurrentSession) {
           saveSessionUser(mergedUser);
@@ -569,9 +727,12 @@ export async function signInWithGoogleAccount(
   const cred = await signInWithPopup(auth, googleProvider);
   const fbUser = cred.user;
   const email = (fbUser.email || 'staff@jiangnanhotpot.com').toLowerCase();
-  const isMaster =
-    email === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase() ||
-    email === MASTER_ACCOUNT_DETAILS.email.toLowerCase();
+  const isMaster = isMasterAccountUser({
+    email,
+    displayName: fbUser.displayName || '',
+    position: defaultPosition,
+    branch: defaultBranch,
+  });
 
   let firestoreProfile: PortalUser | null = null;
   const userDocPath = `users/${fbUser.uid}`;
@@ -589,7 +750,7 @@ export async function signInWithGoogleAccount(
         ? 'approved'
         : resolveBestAccountStatus(d.status, secondaryData?.status);
 
-      firestoreProfile = {
+      firestoreProfile = normalizePortalUser({
         uid: d.uid || fbUser.uid,
         email: d.email || email,
         displayName: d.displayName || secondaryData?.displayName || fbUser.displayName || email,
@@ -603,7 +764,7 @@ export async function signInWithGoogleAccount(
         createdAt: nowIso,
         updatedAt: nowIso,
         authProvider: 'google',
-      };
+      });
     } else {
       const newProfilePayload = {
         uid: fbUser.uid.slice(0, 128),
@@ -620,7 +781,7 @@ export async function signInWithGoogleAccount(
         updatedAt: serverTimestamp(),
       };
       await setDoc(doc(db, 'users', fbUser.uid), newProfilePayload);
-      firestoreProfile = {
+      firestoreProfile = normalizePortalUser({
         uid: newProfilePayload.uid,
         email: newProfilePayload.email,
         displayName: newProfilePayload.displayName,
@@ -634,7 +795,7 @@ export async function signInWithGoogleAccount(
         createdAt: nowIso,
         updatedAt: nowIso,
         authProvider: 'google',
-      };
+      });
     }
   } catch (err) {
     try {
@@ -659,7 +820,7 @@ export async function signInWithGoogleAccount(
     if (res && res.ok) {
       const data = await res.json();
       if (data.user) {
-        firestoreProfile = {
+        firestoreProfile = normalizePortalUser({
           ...data.user,
           ...(firestoreProfile || {}),
           role:
@@ -671,28 +832,30 @@ export async function signInWithGoogleAccount(
             : resolveBestAccountStatus(firestoreProfile?.status, data.user.status),
           ndaAccepted: true,
           ndaSignature: 'I AGREE',
-        };
+        });
       }
     }
   } catch {
     // ignore
   }
 
-  const baseUser: PortalUser = firestoreProfile || {
-    uid: fbUser.uid,
-    email,
-    displayName: fbUser.displayName || email.split('@')[0],
-    position: isMaster ? MASTER_ACCOUNT_DETAILS.position : defaultPosition,
-    branch: isMaster ? MASTER_ACCOUNT_DETAILS.branch : defaultBranch,
-    role: isMaster ? 'master' : 'staff',
-    status: isMaster ? 'approved' : 'pending',
-    ndaAccepted: true,
-    ndaSignature: 'I AGREE',
-    ndaAcceptedAt: nowIso,
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    authProvider: 'google',
-  };
+  const baseUser: PortalUser = normalizePortalUser(
+    firestoreProfile || {
+      uid: fbUser.uid,
+      email,
+      displayName: fbUser.displayName || email.split('@')[0],
+      position: isMaster ? MASTER_ACCOUNT_DETAILS.position : defaultPosition,
+      branch: isMaster ? MASTER_ACCOUNT_DETAILS.branch : defaultBranch,
+      role: isMaster ? 'master' : 'staff',
+      status: isMaster ? 'approved' : 'pending',
+      ndaAccepted: true,
+      ndaSignature: 'I AGREE',
+      ndaAcceptedAt: nowIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      authProvider: 'google',
+    }
+  );
 
   const finalUser = await checkCurrentAccountStatus(baseUser);
   saveSessionUser(finalUser);
@@ -720,16 +883,14 @@ export async function signInWithGoogleCloudDirect(params: {
 
   const isMaster =
     cleanEmail === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase() ||
-    cleanEmail === MASTER_ACCOUNT_DETAILS.email.toLowerCase();
+    cleanEmail === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
+    MASTER_EMAIL_WHITELIST.has(cleanEmail);
 
   if (isMaster) {
     const cleanPw = (params.password || '').trim();
-    if (cleanPw !== MASTER_ACCOUNT_DETAILS.password) {
-      throw new Error(
-        'Master Google Account detected. Please enter the Master Account Password to verify ownership on GitHub Pages.'
-      );
+    if (cleanPw === MASTER_ACCOUNT_DETAILS.password) {
+      return signInWithCredentials(cleanEmail, cleanPw);
     }
-    return signInWithCredentials(cleanEmail, cleanPw);
   }
 
   // Check if this Google email already exists in Firebase Firestore, Express, or LocalStorage
@@ -745,7 +906,7 @@ export async function signInWithGoogleCloudDirect(params: {
       if (d.credentialPass && params.password && d.credentialPass !== params.password.trim()) {
         throw new Error('Incorrect password for this registered Google account.');
       }
-      foundExisting = {
+      foundExisting = normalizePortalUser({
         uid: d.uid || detUid,
         email: d.email || cleanEmail,
         displayName: d.displayName || params.displayName || cleanEmail.split('@')[0],
@@ -760,7 +921,7 @@ export async function signInWithGoogleCloudDirect(params: {
         createdAt: d.ndaAcceptedAt || nowIso,
         updatedAt: nowIso,
         authProvider: 'google',
-      };
+      });
     }
   } catch (err: any) {
     if (err.message?.includes('Incorrect password')) {
@@ -774,7 +935,7 @@ export async function signInWithGoogleCloudDirect(params: {
     );
     if (localMatch) {
       const { password: _pw, ...safe } = localMatch;
-      foundExisting = safe;
+      foundExisting = normalizePortalUser(safe);
     }
   }
 
@@ -783,6 +944,12 @@ export async function signInWithGoogleCloudDirect(params: {
     saveSessionUser(verifiedExisting);
     broadcastAccountSync();
     return verifiedExisting;
+  }
+
+  if (isMaster) {
+    throw new Error(
+      'Master Google Account detected. Please enter the Master Account Password to verify ownership.'
+    );
   }
 
   // If account doesn't exist yet, require "I AGREE" and register directly in Firestore
@@ -817,8 +984,10 @@ export async function signOutPortalUser() {
 export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
   const merged = new Map<string, PortalUser>();
   const firestoreStatusByEmail = new Map<string, string>();
+  const firestoreRoleByEmail = new Map<string, string>();
 
-  const upsertAccount = (acc: PortalUser) => {
+  const upsertAccount = (rawAcc: PortalUser) => {
+    const acc = normalizePortalUser(rawAcc);
     const key = acc.email.trim().toLowerCase();
     const existing = merged.get(key);
     if (!existing) {
@@ -831,22 +1000,33 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
       return;
     }
 
-    const resolvedStatus = resolveBestAccountStatus(existing.status, acc.status);
     const resolvedRole =
-      acc.role === 'master' || existing.role === 'master' ? 'master' : 'staff';
+      acc.role === 'master' ||
+      existing.role === 'master' ||
+      isMasterAccountUser(acc) ||
+      isMasterAccountUser(existing)
+        ? 'master'
+        : 'staff';
+    const resolvedStatus =
+      resolvedRole === 'master'
+        ? 'approved'
+        : resolveBestAccountStatus(existing.status, acc.status);
 
-    merged.set(key, {
-      ...existing,
-      ...acc,
-      displayName: acc.displayName || existing.displayName,
-      position: acc.position || existing.position,
-      branch: acc.branch || existing.branch,
-      role: resolvedRole,
-      status: resolvedStatus,
-      ndaAccepted: true,
-      ndaSignature: acc.ndaSignature || existing.ndaSignature || 'I AGREE',
-      ndaAcceptedAt: acc.ndaAcceptedAt || existing.ndaAcceptedAt || acc.createdAt,
-    });
+    merged.set(
+      key,
+      normalizePortalUser({
+        ...existing,
+        ...acc,
+        displayName: acc.displayName || existing.displayName,
+        position: acc.position || existing.position,
+        branch: acc.branch || existing.branch,
+        role: resolvedRole,
+        status: resolvedStatus,
+        ndaAccepted: true,
+        ndaSignature: acc.ndaSignature || existing.ndaSignature || 'I AGREE',
+        ndaAcceptedAt: acc.ndaAcceptedAt || existing.ndaAcceptedAt || acc.createdAt,
+      })
+    );
   };
 
   // 1. Seed & local accounts
@@ -884,7 +1064,9 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
         const cleanEmail = String(d.email).trim().toLowerCase();
         const docStatus =
           d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending';
+        const docRole = d.role === 'master' ? 'master' : 'staff';
         firestoreStatusByEmail.set(cleanEmail, docStatus);
+        firestoreRoleByEmail.set(cleanEmail, docRole);
 
         const nowIso = new Date().toISOString();
         upsertAccount({
@@ -893,7 +1075,7 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
           displayName: d.displayName || cleanEmail,
           position: d.position || 'Staff',
           branch: d.branch || 'Jiangnan Hotpot',
-          role: d.role === 'master' ? 'master' : 'staff',
+          role: docRole,
           status: docStatus,
           ndaAccepted: true,
           ndaSignature: d.ndaSignature || 'I AGREE',
@@ -908,17 +1090,31 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
     // ignore if offline
   }
 
-  // Self-heal any account that was approved in Master Hub (Express/LocalStorage) but still had 'pending' in Firestore
+  const currentLocal = getLocalAccounts();
+
+  // Self-heal any account that was approved or promoted to Master in Master Hub (Express/LocalStorage)
+  // but still had 'pending' or 'staff' in Firestore
   for (const [emailKey, mergedAcc] of merged.entries()) {
     const fsStatus = firestoreStatusByEmail.get(emailKey);
-    if (mergedAcc.status !== 'pending' && fsStatus === 'pending') {
-      syncAccountToFirestore(mergedAcc).catch(() => {});
+    const fsRole = firestoreRoleByEmail.get(emailKey);
+    const existingLocal = currentLocal.find(
+      (la) => la.email.toLowerCase() === emailKey
+    );
+    if (
+      (mergedAcc.status !== 'pending' && fsStatus === 'pending') ||
+      (mergedAcc.role === 'master' && fsRole !== 'master')
+    ) {
+      syncAccountToFirestore({
+        ...mergedAcc,
+        password: existingLocal?.password,
+      }).catch(() => {});
       apiFetch('/api/auth/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           targetUid: mergedAcc.uid,
           email: mergedAcc.email,
+          password: existingLocal?.password,
           displayName: mergedAcc.displayName,
           position: mergedAcc.position,
           branch: mergedAcc.branch,
@@ -937,7 +1133,6 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
     return (b.createdAt || '').localeCompare(a.createdAt || '');
   });
 
-  const currentLocal = getLocalAccounts();
   saveLocalAccounts(
     list.map((u) => {
       const existingLocal = currentLocal.find(
@@ -947,7 +1142,7 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
     })
   );
 
-  // Also keep active session user in sync if their status or profile changed
+  // Also keep active session user in sync if their status, role, or profile changed
   const activeSession = getSavedSessionUser();
   if (activeSession) {
     const matchedSession = list.find(
@@ -958,6 +1153,7 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
     if (
       matchedSession &&
       (matchedSession.status !== activeSession.status ||
+        matchedSession.role !== activeSession.role ||
         matchedSession.displayName !== activeSession.displayName ||
         matchedSession.position !== activeSession.position ||
         matchedSession.branch !== activeSession.branch)
@@ -1050,7 +1246,9 @@ export async function updateAccountApprovalStatus(
   status: 'pending' | 'approved' | 'rejected',
   role?: 'master' | 'staff'
 ): Promise<PortalUser[]> {
-  const nextRole = role || targetUser.role;
+  const nextRole =
+    role || (isMasterAccountUser(targetUser) ? 'master' : targetUser.role);
+  const nextStatus = nextRole === 'master' ? 'approved' : status;
   const nowIso = new Date().toISOString();
   const cleanEmail = targetUser.email.trim().toLowerCase();
 
@@ -1064,7 +1262,7 @@ export async function updateAccountApprovalStatus(
       storedPassword = a.password;
       return {
         ...a,
-        status,
+        status: nextStatus,
         role: nextRole,
         updatedAt: nowIso,
       };
@@ -1074,7 +1272,7 @@ export async function updateAccountApprovalStatus(
   if (!foundLocal) {
     updatedLocal.push({
       ...targetUser,
-      status,
+      status: nextStatus,
       role: nextRole,
       updatedAt: nowIso,
     });
@@ -1090,7 +1288,7 @@ export async function updateAccountApprovalStatus(
   ) {
     saveSessionUser({
       ...activeSession,
-      status,
+      status: nextStatus,
       role: nextRole,
       updatedAt: nowIso,
     });
@@ -1100,7 +1298,7 @@ export async function updateAccountApprovalStatus(
   await syncAccountToFirestore({
     ...targetUser,
     password: storedPassword,
-    status,
+    status: nextStatus,
     role: nextRole,
     updatedAt: nowIso,
   });
@@ -1113,11 +1311,12 @@ export async function updateAccountApprovalStatus(
       body: JSON.stringify({
         targetUid: targetUser.uid,
         email: targetUser.email,
+        password: storedPassword,
         displayName: targetUser.displayName,
         position: targetUser.position,
         branch: targetUser.branch,
         ndaSignature: targetUser.ndaSignature || 'I AGREE',
-        status,
+        status: nextStatus,
         role: nextRole,
       }),
     });
@@ -1142,11 +1341,21 @@ export async function updateStaffProfileByMaster(
   const cleanName = (updates.displayName || targetUser.displayName).trim().slice(0, 120);
   const cleanPosition = (updates.position || targetUser.position).trim().slice(0, 120);
   const cleanBranch = (updates.branch || targetUser.branch).trim().slice(0, 160);
-  const nextStatus = updates.status || targetUser.status;
-  const nextRole = updates.role || targetUser.role;
+  const nextRole =
+    updates.role ||
+    (isMasterAccountUser({
+      ...targetUser,
+      displayName: cleanName,
+      position: cleanPosition,
+      branch: cleanBranch,
+    })
+      ? 'master'
+      : targetUser.role);
+  const nextStatus =
+    nextRole === 'master' ? 'approved' : updates.status || targetUser.status;
   const nowIso = new Date().toISOString();
 
-  const updatedAccount: PortalUser = {
+  const updatedAccount: PortalUser = normalizePortalUser({
     ...targetUser,
     displayName: cleanName,
     position: cleanPosition,
@@ -1154,7 +1363,7 @@ export async function updateStaffProfileByMaster(
     status: nextStatus,
     role: nextRole,
     updatedAt: nowIso,
-  };
+  });
 
   // 1. Update local accounts list
   const localAccs = getLocalAccounts();
@@ -1216,6 +1425,7 @@ export async function updateStaffProfileByMaster(
       body: JSON.stringify({
         targetUid: targetUser.uid,
         email: targetUser.email,
+        password: storedPassword,
         displayName: cleanName,
         position: cleanPosition,
         branch: cleanBranch,
@@ -1255,14 +1465,11 @@ export async function updateStaffProfileByMaster(
 export async function checkCurrentAccountStatus(user: PortalUser): Promise<PortalUser> {
   const cleanEmail = user.email.trim().toLowerCase();
   const detUid = toDeterministicUid(cleanEmail);
-  const isMaster =
-    user.role === 'master' ||
-    cleanEmail === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
-    cleanEmail === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase();
+  const isMaster = isMasterAccountUser(user);
 
   let firestoreRecord = null as Partial<PortalUser> | null;
   let expressRecord = null as Partial<PortalUser> | null;
-  let localRecord = null as Partial<PortalUser> | null;
+  let localRecord = null as (Partial<PortalUser> & { password?: string }) | null;
 
   const mergeFirestoreData = (docId: string, d: Record<string, any>) => {
     const docStatus =
@@ -1331,29 +1538,32 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
     (a) => a.uid === user.uid || a.email.toLowerCase() === cleanEmail
   );
   if (foundLocal) {
-    const { password: _pw, ...safe } = foundLocal;
-    localRecord = safe;
+    localRecord = foundLocal;
   }
 
-  // 4. Merge across all 3 sources — if ANY source recorded Master approval, reflect 'approved' immediately!
-  const resolvedStatus = isMaster
-    ? 'approved'
-    : resolveBestAccountStatus(
-        firestoreRecord?.status,
-        expressRecord?.status,
-        localRecord?.status,
-        user.status
-      );
-
+  // 4. Merge across all 3 sources — if ANY source recorded Master role or approval, reflect it immediately!
   const resolvedRole: 'master' | 'staff' =
     isMaster ||
     firestoreRecord?.role === 'master' ||
     expressRecord?.role === 'master' ||
-    localRecord?.role === 'master'
+    localRecord?.role === 'master' ||
+    isMasterAccountUser(firestoreRecord) ||
+    isMasterAccountUser(expressRecord) ||
+    isMasterAccountUser(localRecord)
       ? 'master'
       : 'staff';
 
-  const resolvedUser: PortalUser = {
+  const resolvedStatus =
+    resolvedRole === 'master'
+      ? 'approved'
+      : resolveBestAccountStatus(
+          firestoreRecord?.status,
+          expressRecord?.status,
+          localRecord?.status,
+          user.status
+        );
+
+  const resolvedUser: PortalUser = normalizePortalUser({
     ...user,
     uid: firestoreRecord?.uid || expressRecord?.uid || localRecord?.uid || user.uid || detUid,
     email: cleanEmail,
@@ -1376,9 +1586,9 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
     status: resolvedStatus,
     ndaAccepted: true,
     ndaSignature: 'I AGREE',
-  };
+  });
 
-  // Update LocalStorage & active session with the resolved status
+  // Update LocalStorage & active session with the resolved status & role
   const updatedLocalAccs = getLocalAccounts();
   const localIdx = updatedLocalAccs.findIndex(
     (a) => a.uid === resolvedUser.uid || a.email.toLowerCase() === cleanEmail
@@ -1395,19 +1605,25 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
   saveSessionUser(resolvedUser);
 
   // Self-healing:
-  // A) If resolvedStatus is 'approved' or 'rejected' (e.g. approved in Express/Local while Firestore was 'pending', or vice versa),
-  // synchronize the approved status across both Firestore and Express so all stores match!
+  // A) If resolvedStatus is 'approved'/'rejected' or resolvedRole is 'master',
+  // synchronize across both Firestore and Express so all stores match!
   if (
-    resolvedStatus !== 'pending' &&
-    (firestoreRecord?.status !== resolvedStatus || expressRecord?.status !== resolvedStatus)
+    (resolvedStatus !== 'pending' &&
+      (firestoreRecord?.status !== resolvedStatus || expressRecord?.status !== resolvedStatus)) ||
+    (resolvedRole === 'master' &&
+      (firestoreRecord?.role !== 'master' || expressRecord?.role !== 'master'))
   ) {
-    syncAccountToFirestore(resolvedUser).catch(() => {});
+    syncAccountToFirestore({
+      ...resolvedUser,
+      password: localRecord?.password,
+    }).catch(() => {});
     apiFetch('/api/auth/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         targetUid: resolvedUser.uid,
         email: resolvedUser.email,
+        password: localRecord?.password,
         displayName: resolvedUser.displayName,
         position: resolvedUser.position,
         branch: resolvedUser.branch,
@@ -1420,13 +1636,17 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
 
   // B) If resolvedStatus is still 'pending' and missing from Firestore or Express, push it so Master Hub sees it
   if (resolvedStatus === 'pending' && (!firestoreRecord || !expressRecord)) {
-    syncAccountToFirestore(resolvedUser).catch(() => {});
+    syncAccountToFirestore({
+      ...resolvedUser,
+      password: localRecord?.password,
+    }).catch(() => {});
     apiFetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         uid: resolvedUser.uid,
         email: resolvedUser.email,
+        password: localRecord?.password,
         displayName: resolvedUser.displayName,
         position: resolvedUser.position,
         branch: resolvedUser.branch,

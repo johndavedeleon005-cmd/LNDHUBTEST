@@ -33,6 +33,7 @@ import {
 import { PortalUser } from '../types/foodSafety';
 import {
   MASTER_ACCOUNT_DETAILS,
+  isMasterAccountUser,
   signInWithCredentials,
   registerStaffAccount,
   signInWithGoogleAccount,
@@ -68,6 +69,8 @@ const POSITION_OPTIONS = [
   'BOH Broth & Dispatch Specialist',
   'Restaurant Store Manager',
   'Commissary QA Inspector',
+  'L&D Specialist & FSCO (Master Account)',
+  'Learning & Development Manager (Master Account)',
 ];
 
 export const AuthGateModal: React.FC<AuthGateModalProps> = ({
@@ -117,7 +120,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
 
   // Automatically sync pending account to Firestore/Server, listen via real-time subscription, and poll every 2.5s
   useEffect(() => {
-    if (!currentUser || currentUser.role === 'master' || currentUser.status === 'approved') {
+    if (!currentUser || isMasterAccountUser(currentUser) || currentUser.status === 'approved') {
       return;
     }
 
@@ -125,7 +128,11 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
     const syncAndCheck = async () => {
       try {
         const updated = await checkCurrentAccountStatus(currentUser);
-        if (mounted && updated && updated.status !== currentUser.status) {
+        if (
+          mounted &&
+          updated &&
+          (updated.status !== currentUser.status || updated.role !== currentUser.role)
+        ) {
           onAuthenticated(updated);
         }
       } catch {
@@ -140,7 +147,10 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
           a.uid === currentUser.uid ||
           a.email.toLowerCase() === currentUser.email.toLowerCase()
       );
-      if (matched && matched.status !== currentUser.status) {
+      if (
+        matched &&
+        (matched.status !== currentUser.status || matched.role !== currentUser.role)
+      ) {
         onAuthenticated(matched);
       }
     });
@@ -288,7 +298,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   // =========================================================================
   // VIEW 1: ACCOUNT PENDING OR REJECTED BY MASTER ACCOUNT (STRICT LOCKOUT)
   // =========================================================================
-  if (currentUser && currentUser.role !== 'master' && currentUser.status !== 'approved') {
+  if (currentUser && !isMasterAccountUser(currentUser) && currentUser.status !== 'approved') {
     const isRejected = currentUser.status === 'rejected';
 
     return (
