@@ -29,7 +29,7 @@ export const MASTER_CREDENTIALS = {
   branch: 'Imperial Kitchen Group HQ - L&D Department',
 };
 
-const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[] } = {
+const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[]; certificates: any[] } = {
   accounts: [
     {
       uid: 'master-admin-001',
@@ -81,9 +81,26 @@ const DEFAULT_PORTAL_STORE: { accounts: any[]; customDocuments: any[] } = {
     },
   ],
   customDocuments: [],
+  certificates: [
+    {
+      id: 'cert-maria-santos-jiangnanhotpot-com',
+      serialCode: 'IKG-LD-2026-MS8A4F1C',
+      staffName: 'Maria Santos',
+      staffEmail: 'maria.santos@jiangnanhotpot.com',
+      staffPosition: 'Kitchen Shift Lead',
+      staffBranch: 'Jiangnan Hotpot - SM Mall of Asia',
+      quizTitle: 'Food Safety, SOP & Operational Compliance Competency Assessment',
+      score: 10,
+      totalQuestions: 10,
+      percentage: 100,
+      status: 'verified',
+      issuedAt: '2026-10-22T10:15:00.000Z',
+      verifiedBy: 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
+    },
+  ],
 };
 
-function loadPortalStore(): { accounts: any[]; customDocuments: any[] } {
+function loadPortalStore(): { accounts: any[]; customDocuments: any[]; certificates: any[] } {
   for (const candidatePath of [tmpStoreJsonPath, storeJsonPath]) {
     try {
       if (fs.existsSync(candidatePath)) {
@@ -100,6 +117,10 @@ function loadPortalStore(): { accounts: any[]; customDocuments: any[] } {
         return {
           accounts,
           customDocuments: Array.isArray(raw.customDocuments) ? raw.customDocuments : [],
+          certificates:
+            Array.isArray(raw.certificates) && raw.certificates.length > 0
+              ? raw.certificates
+              : DEFAULT_PORTAL_STORE.certificates,
         };
       }
     } catch (err) {
@@ -640,6 +661,23 @@ const handleMasterAccountUpdate = (req: express.Request, res: express.Response) 
     acc.role = role;
   }
   acc.updatedAt = new Date().toISOString();
+
+  // Keep any issued certificate for this staff member synced with Master Hub Name/Position/Branch edits
+  portalStore.certificates = (portalStore.certificates || []).map((c: any) => {
+    if (
+      c &&
+      String(c.staffEmail || '').toLowerCase() === String(acc.email || '').toLowerCase()
+    ) {
+      return {
+        ...c,
+        staffName: acc.displayName,
+        staffPosition: acc.position,
+        staffBranch: acc.branch,
+      };
+    }
+    return c;
+  });
+
   savePortalStore();
 
   return res.json({
@@ -659,6 +697,75 @@ app.delete('/api/auth/accounts/:uid', (req, res) => {
   );
   savePortalStore();
   return res.json({ accounts: portalStore.accounts.map(sanitizeAccount) });
+});
+
+// ============================================================================
+// OFFICIAL SINGLE-CERTIFICATE REGISTRY & MASTER HUB VERIFICATION ENDPOINTS
+// ============================================================================
+
+app.get('/api/certificates', (_req, res) => {
+  return res.json({ certificates: portalStore.certificates || [] });
+});
+
+app.post('/api/certificates', (req, res) => {
+  const { certificate } = req.body || {};
+  if (!certificate || !certificate.serialCode || !certificate.staffName) {
+    return res.status(400).json({ error: 'Certificate serialCode and staffName are required.' });
+  }
+
+  const cleanEmail = String(certificate.staffEmail || '').trim().toLowerCase();
+  const existingIdx = (portalStore.certificates || []).findIndex(
+    (c: any) =>
+      c.id === certificate.id ||
+      (cleanEmail && String(c.staffEmail || '').toLowerCase() === cleanEmail) ||
+      String(c.serialCode || '').toUpperCase() === String(certificate.serialCode).toUpperCase()
+  );
+
+  if (!Array.isArray(portalStore.certificates)) {
+    portalStore.certificates = [];
+  }
+
+  if (existingIdx >= 0) {
+    portalStore.certificates[existingIdx] = {
+      ...portalStore.certificates[existingIdx],
+      ...certificate,
+    };
+  } else {
+    portalStore.certificates.unshift(certificate);
+  }
+
+  savePortalStore();
+  return res.json({
+    certificate,
+    certificates: portalStore.certificates,
+  });
+});
+
+app.post('/api/certificates/status', (req, res) => {
+  const { id, serialCode, staffEmail, status } = req.body || {};
+  if (!status || !['verified', 'revoked'].includes(status)) {
+    return res.status(400).json({ error: 'Valid certificate status is required.' });
+  }
+
+  const cleanEmail = String(staffEmail || '').trim().toLowerCase();
+  const cleanSerial = String(serialCode || '').trim().toUpperCase();
+
+  portalStore.certificates = (portalStore.certificates || []).map((c: any) => {
+    if (
+      c.id === id ||
+      (cleanSerial && String(c.serialCode || '').toUpperCase() === cleanSerial) ||
+      (cleanEmail && String(c.staffEmail || '').toLowerCase() === cleanEmail)
+    ) {
+      return {
+        ...c,
+        status,
+      };
+    }
+    return c;
+  });
+
+  savePortalStore();
+  return res.json({ certificates: portalStore.certificates });
 });
 
 // ============================================================================

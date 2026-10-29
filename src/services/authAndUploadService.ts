@@ -23,6 +23,8 @@ import {
   DepartmentCategory,
   CustomSimulationStep,
   CustomHazardSpot,
+  TrainingCertificateRecord,
+  CertificateVerificationStatus,
 } from '../types/foodSafety';
 
 export const MASTER_ACCOUNT_DETAILS = {
@@ -38,11 +40,43 @@ export const MASTER_ACCOUNT_DETAILS = {
 const LOCAL_ACCOUNTS_KEY = 'ikqa_portal_accounts_v1';
 const LOCAL_SESSION_KEY = 'ikqa_active_session_v1';
 const LOCAL_DOCS_KEY = 'ikqa_documents_v2';
+const LOCAL_CERTS_KEY = 'ikqa_issued_certificates_v1';
 const SYNC_CHANNEL_NAME = 'ikqa_portal_sync_v1';
 const CLOUD_API_ORIGIN = 'https://ais-pre-76tv6e65bsiare5wrmxxvo-551232212768.asia-east1.run.app';
 
 export function toDeterministicUid(email: string): string {
   return `user-${email.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 90)}`;
+}
+
+export function toDeterministicCertId(staffEmail: string, staffName?: string): string {
+  const key = (staffEmail || staffName || 'staff-member')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 90);
+  return `cert-${key || 'staff'}`;
+}
+
+export function generateDeterministicCertSerial(staffEmail: string, staffName?: string): string {
+  const seed = `${(staffEmail || '').trim().toLowerCase()}|${(staffName || '').trim().toLowerCase()}`;
+  let h1 = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    h1 ^= seed.charCodeAt(i);
+    h1 = Math.imul(h1, 0x01000193);
+  }
+  const hex = (h1 >>> 0).toString(16).toUpperCase().padStart(8, '0').slice(0, 6);
+  const initials = (staffName || staffEmail || 'ST')
+    .replace(/[^a-zA-Z\s]/g, '')
+    .trim()
+    .split(/\s+/)
+    .map((w) => w[0] || '')
+    .join('')
+    .toUpperCase()
+    .slice(0, 2)
+    .padEnd(2, 'X');
+  return `IKG-LD-2026-${initials}${hex}`;
 }
 
 function broadcastAccountSync() {
@@ -1009,6 +1043,26 @@ export async function updateStaffProfileByMaster(
     // ignore
   }
 
+  // 4. Sync any existing certificate for this staff member so their certificate identity matches Master Hub edits
+  try {
+    const existingCerts = getLocalCertificates();
+    const matchedCert = existingCerts.find(
+      (c) =>
+        c.staffEmail.toLowerCase() === targetUser.email.toLowerCase() ||
+        c.id === toDeterministicCertId(targetUser.email, targetUser.displayName)
+    );
+    if (matchedCert) {
+      await issueOrUpdateTrainingCertificate({
+        ...matchedCert,
+        staffName: cleanName,
+        staffPosition: cleanPosition,
+        staffBranch: cleanBranch,
+      });
+    }
+  } catch {
+    // ignore
+  }
+
   broadcastAccountSync();
   return fetchAllPortalAccounts();
 }
@@ -1485,3 +1539,390 @@ export function saveDocumentsToLocalStorage(docs: FoodSafetyDoc[]) {
     // ignore
   }
 }
+
+// ============================================================================
+// SINGLE OFFICIAL CERTIFICATE REGISTRY & MASTER HUB VERIFICATION
+// ============================================================================
+
+const DEFAULT_SEED_CERTIFICATES: TrainingCertificateRecord[] = [
+  {
+    id: toDeterministicCertId('maria.santos@jiangnanhotpot.com', 'Maria Santos'),
+    serialCode: generateDeterministicCertSerial('maria.santos@jiangnanhotpot.com', 'Maria Santos'),
+    staffName: 'Maria Santos',
+    staffEmail: 'maria.santos@jiangnanhotpot.com',
+    staffPosition: 'Kitchen Shift Lead',
+    staffBranch: 'Jiangnan Hotpot - SM Mall of Asia',
+    quizTitle: 'Food Safety, SOP & Operational Compliance Competency Assessment',
+    score: 10,
+    totalQuestions: 10,
+    percentage: 100,
+    status: 'verified',
+    issuedAt: '2026-10-22T10:15:00.000Z',
+    verifiedBy: 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
+  },
+];
+
+function deduplicateCertificatesList(
+  certs: TrainingCertificateRecord[]
+): TrainingCertificateRecord[] {
+  const byStaffKey = new Map<string, TrainingCertificateRecord>();
+
+  for (const cert of certs) {
+    if (!cert) continue;
+    const emailKey = (cert.staffEmail || '').trim().toLowerCase();
+    const nameKey = (cert.staffName || '').trim().toLowerCase();
+    // Strictly 1 certificate per staff member (keyed by email or deterministic ID)
+    const staffUniqueKey = emailKey || cert.id || nameKey;
+    if (!staffUniqueKey) continue;
+
+    const canonicalId = toDeterministicCertId(emailKey || nameKey, cert.staffName);
+    const canonicalSerial =
+      cert.serialCode && cert.serialCode.startsWith('IKG-LD-')
+        ? cert.serialCode
+        : generateDeterministicCertSerial(emailKey || nameKey, cert.staffName);
+
+    const normalized: TrainingCertificateRecord = {
+      ...cert,
+      id: canonicalId,
+      serialCode: canonicalSerial,
+      staffEmail: emailKey || `${nameKey.replace(/[^a-z0-9]/g, '.')}@jiangnanhotpot.com`,
+      staffName: (cert.staffName || 'Staff Member').trim(),
+      staffPosition: (cert.staffPosition || 'Kitchen Shift Lead').trim(),
+      staffBranch: (cert.staffBranch || 'Jiangnan Hotpot - SM Mall of Asia').trim(),
+      quizTitle:
+        cert.quizTitle ||
+        'Food Safety, SOP & Operational Compliance Competency Assessment',
+      score: Number(cert.score ?? 10),
+      totalQuestions: Number(cert.totalQuestions ?? 10),
+      percentage: Math.round(
+        (Number(cert.score ?? 10) / Math.max(1, Number(cert.totalQuestions ?? 10))) * 100
+      ),
+      status: cert.status === 'revoked' ? 'revoked' : 'verified',
+      issuedAt: cert.issuedAt || new Date().toISOString(),
+      verifiedBy:
+        cert.verifiedBy || 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
+    };
+
+    const existing = byStaffKey.get(staffUniqueKey);
+    if (!existing) {
+      byStaffKey.set(staffUniqueKey, normalized);
+    } else {
+      // Keep the latest updated/issued record while preserving revoked status if revoked by Master
+      const nextStatus: CertificateVerificationStatus =
+        normalized.status === 'revoked' || existing.status === 'revoked'
+          ? normalized.status
+          : 'verified';
+      byStaffKey.set(staffUniqueKey, {
+        ...existing,
+        ...normalized,
+        id: canonicalId,
+        serialCode: existing.serialCode || canonicalSerial,
+        status: nextStatus,
+      });
+    }
+  }
+
+  return Array.from(byStaffKey.values()).sort((a, b) =>
+    (b.issuedAt || '').localeCompare(a.issuedAt || '')
+  );
+}
+
+export function getLocalCertificates(): TrainingCertificateRecord[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_CERTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return deduplicateCertificatesList(parsed);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return deduplicateCertificatesList(DEFAULT_SEED_CERTIFICATES);
+}
+
+export function saveLocalCertificates(certs: TrainingCertificateRecord[]) {
+  try {
+    const deduped = deduplicateCertificatesList(certs);
+    localStorage.setItem(LOCAL_CERTS_KEY, JSON.stringify(deduped));
+  } catch {
+    // ignore
+  }
+}
+
+async function syncCertificateToFirestore(
+  cert: TrainingCertificateRecord
+): Promise<void> {
+  const docId = cert.id.slice(0, 128);
+  const payload = {
+    id: docId,
+    serialCode: cert.serialCode.slice(0, 64),
+    staffName: cert.staffName.slice(0, 120),
+    staffEmail: cert.staffEmail.trim().toLowerCase().slice(0, 254),
+    staffPosition: cert.staffPosition.slice(0, 120),
+    staffBranch: cert.staffBranch.slice(0, 160),
+    quizTitle: cert.quizTitle.slice(0, 240),
+    score: Number(cert.score || 10),
+    totalQuestions: Number(cert.totalQuestions || 10),
+    percentage: Number(cert.percentage || 100),
+    status: cert.status === 'revoked' ? 'revoked' : 'verified',
+    issuedAt: (cert.issuedAt || new Date().toISOString()).slice(0, 64),
+    verifiedBy: (
+      cert.verifiedBy || 'Imperial Kitchen Group L&D Team (Master Hub Verified)'
+    ).slice(0, 160),
+    visibility: 'portal_verified',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  try {
+    const ref = doc(db, 'certificates', docId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      const existingData = snap.data();
+      await setDoc(ref, {
+        ...payload,
+        serialCode: existingData.serialCode || payload.serialCode,
+        staffEmail: existingData.staffEmail || payload.staffEmail,
+        createdAt: existingData.createdAt || serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, payload);
+    }
+  } catch {
+    // ignore if offline
+  }
+}
+
+export async function issueOrUpdateTrainingCertificate(params: {
+  staffName: string;
+  staffEmail?: string;
+  staffPosition: string;
+  staffBranch: string;
+  quizTitle?: string;
+  score?: number;
+  totalQuestions?: number;
+  issuedAt?: string;
+  status?: CertificateVerificationStatus;
+}): Promise<TrainingCertificateRecord> {
+  const sessionUser = getSavedSessionUser();
+  const resolvedEmail = (
+    params.staffEmail ||
+    (sessionUser &&
+    sessionUser.displayName.toLowerCase() === (params.staffName || '').trim().toLowerCase()
+      ? sessionUser.email
+      : '') ||
+    `${(params.staffName || 'staff.member')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '.')}@jiangnanhotpot.com`
+  )
+    .trim()
+    .toLowerCase();
+
+  const certId = toDeterministicCertId(resolvedEmail, params.staffName);
+  const existingLocal = getLocalCertificates().find(
+    (c) => c.id === certId || c.staffEmail.toLowerCase() === resolvedEmail
+  );
+
+  const serialCode =
+    existingLocal?.serialCode ||
+    generateDeterministicCertSerial(resolvedEmail, params.staffName);
+  const score = Number(params.score ?? existingLocal?.score ?? 10);
+  const totalQuestions = Math.max(
+    1,
+    Number(params.totalQuestions ?? existingLocal?.totalQuestions ?? 10)
+  );
+  const percentage = Math.round((score / totalQuestions) * 100);
+  const issuedAt =
+    params.issuedAt || existingLocal?.issuedAt || new Date().toISOString();
+  const status: CertificateVerificationStatus =
+    params.status || existingLocal?.status || 'verified';
+
+  const record: TrainingCertificateRecord = {
+    id: certId,
+    serialCode,
+    staffName: (params.staffName || existingLocal?.staffName || 'Staff Member').trim(),
+    staffEmail: resolvedEmail,
+    staffPosition: (
+      params.staffPosition ||
+      existingLocal?.staffPosition ||
+      'Kitchen Shift Lead'
+    ).trim(),
+    staffBranch: (
+      params.staffBranch ||
+      existingLocal?.staffBranch ||
+      'Jiangnan Hotpot - SM Mall of Asia'
+    ).trim(),
+    quizTitle:
+      params.quizTitle ||
+      existingLocal?.quizTitle ||
+      'Food Safety, SOP & Operational Compliance Competency Assessment',
+    score,
+    totalQuestions,
+    percentage,
+    status,
+    issuedAt,
+    verifiedBy: 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
+  };
+
+  // 1. Save deduplicated single certificate per user in LocalStorage
+  const allLocal = getLocalCertificates().filter(
+    (c) => c.id !== certId && c.staffEmail.toLowerCase() !== resolvedEmail
+  );
+  allLocal.unshift(record);
+  saveLocalCertificates(allLocal);
+
+  // 2. Sync to Firestore /certificates/{certId}
+  await syncCertificateToFirestore(record);
+
+  // 3. Sync to Express backend
+  try {
+    await apiFetch('/api/certificates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ certificate: record }),
+    });
+  } catch {
+    // ignore
+  }
+
+  broadcastAccountSync();
+  return record;
+}
+
+export async function fetchAllIssuedCertificates(): Promise<TrainingCertificateRecord[]> {
+  const combined: TrainingCertificateRecord[] = [...getLocalCertificates()];
+
+  // 1. Express backend certificates
+  try {
+    const res = await apiFetch('/api/certificates');
+    if (res && res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.certificates)) {
+        combined.push(...data.certificates);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Firebase Firestore /certificates
+  try {
+    const q = query(
+      collection(db, 'certificates'),
+      where('visibility', '==', 'portal_verified')
+    );
+    const snap = await getDocs(q);
+    snap.forEach((docSnap) => {
+      const d = docSnap.data();
+      if (d && d.serialCode && d.staffName) {
+        combined.push({
+          id: d.id || docSnap.id,
+          serialCode: d.serialCode,
+          staffName: d.staffName,
+          staffEmail: d.staffEmail || 'staff@jiangnanhotpot.com',
+          staffPosition: d.staffPosition || 'Restaurant Staff',
+          staffBranch: d.staffBranch || 'Jiangnan Hotpot',
+          quizTitle:
+            d.quizTitle ||
+            'Food Safety, SOP & Operational Compliance Competency Assessment',
+          score: Number(d.score ?? 10),
+          totalQuestions: Number(d.totalQuestions ?? 10),
+          percentage: Number(d.percentage ?? 100),
+          status: d.status === 'revoked' ? 'revoked' : 'verified',
+          issuedAt: d.issuedAt || new Date().toISOString(),
+          verifiedBy:
+            d.verifiedBy || 'Imperial Kitchen Group L&D Team (Master Hub Verified)',
+        });
+      }
+    });
+  } catch {
+    // ignore
+  }
+
+  const deduped = deduplicateCertificatesList(combined);
+  saveLocalCertificates(deduped);
+  return deduped;
+}
+
+export async function updateCertificateStatusByMaster(
+  cert: TrainingCertificateRecord,
+  status: CertificateVerificationStatus
+): Promise<TrainingCertificateRecord[]> {
+  await issueOrUpdateTrainingCertificate({
+    ...cert,
+    status,
+  });
+
+  try {
+    await apiFetch('/api/certificates/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: cert.id,
+        serialCode: cert.serialCode,
+        staffEmail: cert.staffEmail,
+        status,
+      }),
+    });
+  } catch {
+    // ignore
+  }
+
+  return fetchAllIssuedCertificates();
+}
+
+export function subscribeToIssuedCertificates(
+  onUpdate: (certs: TrainingCertificateRecord[]) => void
+): () => void {
+  let active = true;
+
+  const refresh = () => {
+    if (!active) return;
+    fetchAllIssuedCertificates()
+      .then((list) => {
+        if (active) onUpdate(list);
+      })
+      .catch(() => {});
+  };
+
+  refresh();
+
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    const q = query(
+      collection(db, 'certificates'),
+      where('visibility', '==', 'portal_verified')
+    );
+    unsubFirestore = onSnapshot(
+      q,
+      () => refresh(),
+      () => {}
+    );
+  } catch {
+    // ignore
+  }
+
+  let bc: BroadcastChannel | null = null;
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      bc = new BroadcastChannel(SYNC_CHANNEL_NAME);
+      bc.onmessage = () => refresh();
+    }
+  } catch {
+    // ignore
+  }
+
+  const intervalId = setInterval(refresh, 5000);
+
+  return () => {
+    active = false;
+    if (unsubFirestore) unsubFirestore();
+    if (bc) bc.close();
+    clearInterval(intervalId);
+  };
+}
+

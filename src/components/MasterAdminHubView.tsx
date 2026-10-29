@@ -23,12 +23,17 @@ import {
   Pencil,
   Save,
   X,
+  Award,
+  Search,
+  Eye,
 } from 'lucide-react';
 import {
   PortalUser,
   FoodSafetyDoc,
   DocumentType,
   DepartmentCategory,
+  TrainingCertificateRecord,
+  CertificateVerificationStatus,
 } from '../types/foodSafety';
 import {
   MASTER_ACCOUNT_DETAILS,
@@ -40,7 +45,12 @@ import {
   parseDocumentWithAI,
   publishCustomDocument,
   removeCustomDocument,
+  fetchAllIssuedCertificates,
+  subscribeToIssuedCertificates,
+  updateCertificateStatusByMaster,
+  issueOrUpdateTrainingCertificate,
 } from '../services/authAndUploadService';
+import { TrainingCertificateModal } from './TrainingCertificateModal';
 
 interface MasterAdminHubViewProps {
   currentUser: PortalUser;
@@ -140,7 +150,9 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   onAccountsChanged,
   onAccountProfileUpdated,
 }) => {
-  const [activeSection, setActiveSection] = useState<'approvals' | 'uploader' | 'credentials'>('approvals');
+  const [activeSection, setActiveSection] = useState<
+    'approvals' | 'uploader' | 'certificates' | 'credentials'
+  >('certificates');
 
   // Accounts state
   const [accounts, setAccounts] = useState<PortalUser[]>([]);
@@ -163,6 +175,15 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   const [newStaffBranch, setNewStaffBranch] = useState('Jiangnan Hotpot - SM Mall of Asia');
   const [showAddStaffForm, setShowAddStaffForm] = useState(false);
 
+  // Certificate Verification & Single-Certificate Registry state
+  const [certificates, setCertificates] = useState<TrainingCertificateRecord[]>([]);
+  const [loadingCertificates, setLoadingCertificates] = useState(false);
+  const [certSearchQuery, setCertSearchQuery] = useState('');
+  const [verifiedLookupResult, setVerifiedLookupResult] = useState<TrainingCertificateRecord | null>(null);
+  const [certLookupAttempted, setCertLookupAttempted] = useState(false);
+  const [previewCert, setPreviewCert] = useState<TrainingCertificateRecord | null>(null);
+  const [certStatusMessage, setCertStatusMessage] = useState<string | null>(null);
+
   // Uploader state
   const [docType, setDocType] = useState<DocumentType>('checklist');
   const [docCode, setDocCode] = useState('');
@@ -180,6 +201,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
 
   const customDocs = documents.filter((d) => d.isCustom);
   const pendingAccountsCount = accounts.filter((a) => a.role !== 'master' && a.status === 'pending').length;
+  const verifiedCertificatesCount = certificates.filter((c) => c.status === 'verified').length;
 
   const loadAccounts = async () => {
     setLoadingAccounts(true);
@@ -194,6 +216,16 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
     }
   };
 
+  const loadCertificates = async () => {
+    setLoadingCertificates(true);
+    try {
+      const list = await fetchAllIssuedCertificates();
+      setCertificates(list);
+    } finally {
+      setLoadingCertificates(false);
+    }
+  };
+
   useEffect(() => {
     const unsubscribe = subscribeToPortalAccounts((list) => {
       setAccounts(list);
@@ -203,6 +235,78 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
     });
     return () => unsubscribe();
   }, [onAccountsChanged]);
+
+  useEffect(() => {
+    const unsubCerts = subscribeToIssuedCertificates((list) => {
+      setCertificates(list);
+    });
+    return () => unsubCerts();
+  }, []);
+
+  const handleVerifyCertificateQuery = (e?: React.FormEvent, customCode?: string) => {
+    if (e) e.preventDefault();
+    const q = (customCode !== undefined ? customCode : certSearchQuery).trim().toLowerCase();
+    if (!q) {
+      setCertLookupAttempted(false);
+      setVerifiedLookupResult(null);
+      return;
+    }
+    setCertLookupAttempted(true);
+    const exactOrPartial =
+      certificates.find((c) => c.serialCode.toLowerCase() === q) ||
+      certificates.find((c) => c.staffEmail.toLowerCase() === q) ||
+      certificates.find((c) => c.staffName.toLowerCase() === q) ||
+      certificates.find(
+        (c) =>
+          c.serialCode.toLowerCase().includes(q) ||
+          c.staffName.toLowerCase().includes(q) ||
+          c.staffEmail.toLowerCase().includes(q)
+      ) ||
+      null;
+    setVerifiedLookupResult(exactOrPartial);
+  };
+
+  const handleToggleCertificateStatus = async (
+    cert: TrainingCertificateRecord,
+    nextStatus: CertificateVerificationStatus
+  ) => {
+    const updatedList = await updateCertificateStatusByMaster(cert, nextStatus);
+    setCertificates(updatedList);
+    const refreshed =
+      updatedList.find((c) => c.id === cert.id || c.serialCode === cert.serialCode) || null;
+    if (verifiedLookupResult && verifiedLookupResult.serialCode === cert.serialCode) {
+      setVerifiedLookupResult(refreshed);
+    }
+    setCertStatusMessage(
+      nextStatus === 'verified'
+        ? `Certificate ${cert.serialCode} (${cert.staffName}) marked as VERIFIED & AUTHENTIC in Master Hub.`
+        : `Certificate ${cert.serialCode} (${cert.staffName}) marked as REVOKED in Master Hub.`
+    );
+    setTimeout(() => setCertStatusMessage(null), 4000);
+  };
+
+  const handleMasterIssueSingleCertForAccount = async (acc: PortalUser) => {
+    const issued = await issueOrUpdateTrainingCertificate({
+      staffName: acc.displayName,
+      staffEmail: acc.email,
+      staffPosition: acc.position,
+      staffBranch: acc.branch,
+      quizTitle: 'Food Safety, SOP & Operational Compliance Competency Assessment',
+      score: 10,
+      totalQuestions: 10,
+      status: 'verified',
+    });
+    const refreshed = await fetchAllIssuedCertificates();
+    setCertificates(refreshed);
+    setActiveSection('certificates');
+    setCertSearchQuery(issued.serialCode);
+    setCertLookupAttempted(true);
+    setVerifiedLookupResult(issued);
+    setCertStatusMessage(
+      `Issued & verified single official certificate (${issued.serialCode}) for ${acc.displayName}.`
+    );
+    setTimeout(() => setCertStatusMessage(null), 4000);
+  };
 
   const handleCopy = (val: string, key: string) => {
     navigator.clipboard?.writeText(val).catch(() => {});
@@ -410,14 +514,14 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
               <span>MASTER ACCOUNT CONTROL CENTER · {currentUser.email}</span>
             </div>
             <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
-              Master Account Approval & AI/Game Document Studio
+              Master Account Approval, Certificate Verification &amp; AI/Game Studio
             </h2>
             <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-              Approve staff account registrations and upload SOPs, Policies, Guides, and Station Checklists. Every uploaded document is automatically integrated into L&D Virtual Support AI, the Station Checklist Simulator, the 8-Bit Hazard Game, and the Training Quiz.
+              Verify staff training certificates by Serial Code or Name, approve staff account registrations, edit locked certificate identities, and upload SOPs, Policies, Guides, and Station Checklists.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-center">
+          <div className="flex items-center gap-2 self-start sm:self-center flex-wrap">
             <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-amber-500/40 text-center">
               <span className="text-[10px] text-slate-400 block font-semibold">Pending Accounts</span>
               <span className="text-base font-mono font-black text-amber-400 tabular-nums">
@@ -425,8 +529,14 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
               </span>
             </div>
             <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-emerald-500/40 text-center">
-              <span className="text-[10px] text-slate-400 block font-semibold">Uploaded Docs</span>
+              <span className="text-[10px] text-slate-400 block font-semibold">Verified Certs</span>
               <span className="text-base font-mono font-black text-emerald-400 tabular-nums">
+                {verifiedCertificatesCount}
+              </span>
+            </div>
+            <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-slate-700 text-center">
+              <span className="text-[10px] text-slate-400 block font-semibold">Uploaded Docs</span>
+              <span className="text-base font-mono font-black text-white tabular-nums">
                 {customDocs.length}
               </span>
             </div>
@@ -434,46 +544,422 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
         </div>
 
         {/* Navigation Switcher inside Master Hub */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-800/80">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80">
           <button
-            onClick={() => setActiveSection('uploader')}
-            className={`py-2.5 px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
-              activeSection === 'uploader'
+            onClick={() => setActiveSection('certificates')}
+            className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+              activeSection === 'certificates'
                 ? 'bg-amber-500 text-slate-950 shadow-md'
                 : 'bg-slate-950/80 text-slate-300 hover:text-white border border-slate-800'
             }`}
           >
-            <Upload className="w-4 h-4" />
-            <span>1. Upload SOPs, Policies, Guides & Checklists</span>
+            <Award className="w-4 h-4 shrink-0" />
+            <span>1. Verify Certificates ({certificates.length})</span>
           </button>
 
           <button
             onClick={() => setActiveSection('approvals')}
-            className={`py-2.5 px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+            className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
               activeSection === 'approvals'
                 ? 'bg-amber-500 text-slate-950 shadow-md'
                 : 'bg-slate-950/80 text-slate-300 hover:text-white border border-slate-800'
             }`}
           >
-            <UserCheck className="w-4 h-4" />
-            <span>
-              2. Staff Account Approvals ({pendingAccountsCount} Pending)
-            </span>
+            <UserCheck className="w-4 h-4 shrink-0" />
+            <span>2. Staff Approvals ({pendingAccountsCount} Pending)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSection('uploader')}
+            className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+              activeSection === 'uploader'
+                ? 'bg-amber-500 text-slate-950 shadow-md'
+                : 'bg-slate-950/80 text-slate-300 hover:text-white border border-slate-800'
+            }`}
+          >
+            <Upload className="w-4 h-4 shrink-0" />
+            <span>3. Upload SOPs &amp; Checklists</span>
           </button>
 
           <button
             onClick={() => setActiveSection('credentials')}
-            className={`py-2.5 px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+            className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
               activeSection === 'credentials'
                 ? 'bg-amber-500 text-slate-950 shadow-md'
                 : 'bg-slate-950/80 text-slate-300 hover:text-white border border-slate-800'
             }`}
           >
-            <KeyRound className="w-4 h-4" />
-            <span>3. Master Account Details & Credentials</span>
+            <KeyRound className="w-4 h-4 shrink-0" />
+            <span>4. Master Credentials</span>
           </button>
         </div>
       </div>
+
+      {/* =====================================================================
+          SECTION 0: MASTER HUB CERTIFICATE VERIFICATION & SINGLE-CERT REGISTRY
+         ===================================================================== */}
+      {activeSection === 'certificates' && (
+        <div className="space-y-4">
+          {/* Certificate Serial / Staff Name Instant Verification Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Master Hub Official Certificate Verification Tool</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Enter any Certificate Serial Code (e.g. <code className="text-amber-300">IKG-LD-2026-...</code>), Employee Name, or Email to verify authenticity. Strictly one official certificate is maintained per staff member.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadCertificates}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 self-start sm:self-center cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingCertificates ? 'animate-spin' : ''}`} />
+                <span>Refresh Registry</span>
+              </button>
+            </div>
+
+            {certStatusMessage && (
+              <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/60 text-xs font-bold text-emerald-200 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{certStatusMessage}</span>
+              </div>
+            )}
+
+            {/* Search & Verify Input Form */}
+            <form
+              onSubmit={(e) => handleVerifyCertificateQuery(e)}
+              className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5"
+            >
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={certSearchQuery}
+                  onChange={(e) => {
+                    setCertSearchQuery(e.target.value);
+                    if (!e.target.value.trim()) {
+                      setCertLookupAttempted(false);
+                      setVerifiedLookupResult(null);
+                    }
+                  }}
+                  placeholder="Enter Certificate Serial (e.g. IKG-LD-2026-...), Staff Name, or Email..."
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl pl-10 pr-9 py-2.5 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none"
+                />
+                {certSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCertSearchQuery('');
+                      setCertLookupAttempted(false);
+                      setVerifiedLookupResult(null);
+                    }}
+                    className="p-1 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer shrink-0"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>Verify Certificate</span>
+              </button>
+            </form>
+
+            {/* Quick-Verify Serial Chips */}
+            {certificates.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                <span className="text-slate-400 font-semibold">Quick Verify Issued Serials:</span>
+                {certificates.slice(0, 5).map((c) => (
+                  <button
+                    key={`quick-${c.id}`}
+                    type="button"
+                    onClick={() => {
+                      setCertSearchQuery(c.serialCode);
+                      handleVerifyCertificateQuery(undefined, c.serialCode);
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 text-amber-300 font-mono font-bold text-[10px] cursor-pointer"
+                  >
+                    {c.serialCode} ({c.staffName})
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Instant Verification Lookup Result Card */}
+            {certLookupAttempted && (
+              <div className="pt-1">
+                {verifiedLookupResult ? (
+                  <div
+                    className={`p-4 rounded-2xl border-2 space-y-3 ${
+                      verifiedLookupResult.status === 'verified'
+                        ? 'bg-emerald-950/30 border-emerald-500/70'
+                        : 'bg-red-950/30 border-red-500/70'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                            verifiedLookupResult.status === 'verified'
+                              ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                              : 'bg-red-500/20 border-red-400 text-red-300'
+                          }`}
+                        >
+                          <Award className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-black uppercase ${
+                                verifiedLookupResult.status === 'verified'
+                                  ? 'bg-emerald-500 text-slate-950'
+                                  : 'bg-red-600 text-white'
+                              }`}
+                            >
+                              {verifiedLookupResult.status === 'verified'
+                                ? '✓ AUTHENTIC & VERIFIED BY MASTER HUB'
+                                : '✕ CERTIFICATE REVOKED'}
+                            </span>
+                            <span className="font-mono text-xs font-black text-amber-300">
+                              Serial: {verifiedLookupResult.serialCode}
+                            </span>
+                          </div>
+                          <h4 className="text-sm sm:text-base font-black text-white mt-0.5">
+                            {verifiedLookupResult.staffName} — {verifiedLookupResult.staffPosition}
+                          </h4>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewCert(verifiedLookupResult)}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Preview Single Certificate</span>
+                        </button>
+                        {verifiedLookupResult.status === 'verified' ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleToggleCertificateStatus(verifiedLookupResult, 'revoked')
+                            }
+                            className="px-3 py-1.5 rounded-xl bg-red-950 hover:bg-red-900 text-red-200 border border-red-800 text-xs font-bold cursor-pointer"
+                          >
+                            Revoke Certificate
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleToggleCertificateStatus(verifiedLookupResult, 'verified')
+                            }
+                            className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black cursor-pointer"
+                          >
+                            Re-Verify Certificate
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 pt-2 border-t border-slate-800/80 text-xs">
+                      <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                        <span className="text-[10px] text-slate-400 block">Staff Email / ID</span>
+                        <span className="font-mono font-bold text-slate-200 truncate block">
+                          {verifiedLookupResult.staffEmail}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                        <span className="text-[10px] text-slate-400 block">Branch Location</span>
+                        <span className="font-semibold text-slate-200 truncate block">
+                          {verifiedLookupResult.staffBranch}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                        <span className="text-[10px] text-slate-400 block">Verified Score</span>
+                        <span className="font-bold text-emerald-400">
+                          {verifiedLookupResult.score}/{verifiedLookupResult.totalQuestions} (
+                          {verifiedLookupResult.percentage}%) • Passed
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                        <span className="text-[10px] text-slate-400 block">Date Issued</span>
+                        <span className="font-mono text-slate-200">
+                          {new Date(verifiedLookupResult.issuedAt).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-red-950/40 border border-red-700/60 flex items-center justify-between gap-3 text-xs text-red-200">
+                    <div className="flex items-center gap-2.5">
+                      <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                      <div>
+                        <span className="font-bold text-white block">
+                          No Matching Certificate Found for &ldquo;{certSearchQuery}&rdquo;
+                        </span>
+                        <span>
+                          Verify that the Certificate Serial Code (e.g. IKG-LD-2026-...) or Staff Name is entered accurately.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Master Hub Registry Table of All Issued Single Certificates */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Award className="w-4 h-4 text-amber-400" />
+                  <span>
+                    Official Issued Certificates Registry ({certificates.length} Staff Certified — 1 Certificate Per Staff)
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Every staff member is strictly limited to one (1) official verifiable certificate locked to their approved Sign-In Name &amp; Position.
+                </p>
+              </div>
+              <span className="text-[11px] font-mono text-emerald-400 font-bold">
+                {verifiedCertificatesCount} Verified · {certificates.length - verifiedCertificatesCount} Revoked
+              </span>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-900/80 text-[10px] font-mono uppercase text-slate-400">
+                    <th className="py-2.5 px-3">Verification Serial</th>
+                    <th className="py-2.5 px-3">Staff Name &amp; Email</th>
+                    <th className="py-2.5 px-3">Locked Position &amp; Branch</th>
+                    <th className="py-2.5 px-3">Score</th>
+                    <th className="py-2.5 px-3">Date Issued</th>
+                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3">Master Verification Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {certificates.map((cert) => (
+                    <tr key={cert.id} className="hover:bg-slate-900/40">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono font-black text-amber-300">
+                            {cert.serialCode}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(cert.serialCode, `cert-${cert.id}`)}
+                            className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+                            title="Copy Serial Code"
+                          >
+                            {copiedKey === `cert-${cert.id}` ? (
+                              <Check className="w-3 h-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 font-bold text-white whitespace-nowrap">
+                        {cert.staffName}
+                        <span className="block text-[10px] font-mono font-normal text-slate-400">
+                          {cert.staffEmail}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-300">
+                        <span className="font-semibold text-amber-300">{cert.staffPosition}</span>
+                        <span className="block text-[10px] text-slate-400">{cert.staffBranch}</span>
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap font-mono font-bold text-emerald-400">
+                        {cert.score}/{cert.totalQuestions} ({cert.percentage}%)
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11px] text-slate-400">
+                        {new Date(cert.issuedAt).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        {cert.status === 'verified' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-bold text-[10px]">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>VERIFIED</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-950 text-red-300 border border-red-700/60 font-bold text-[10px]">
+                            <AlertCircle className="w-3 h-3 text-red-400" />
+                            <span>REVOKED</span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCertSearchQuery(cert.serialCode);
+                              handleVerifyCertificateQuery(undefined, cert.serialCode);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-700/50 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>Verify</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setPreviewCert(cert)}
+                            className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>View Cert</span>
+                          </button>
+
+                          {cert.status === 'verified' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleCertificateStatus(cert, 'revoked')}
+                              className="px-2 py-1 rounded-lg bg-red-950/70 hover:bg-red-900 text-red-200 border border-red-800/50 text-[10px] font-semibold cursor-pointer"
+                            >
+                              Revoke
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleCertificateStatus(cert, 'verified')}
+                              className="px-2 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[10px] font-black cursor-pointer"
+                            >
+                              Restore
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* =====================================================================
           SECTION 1: UPLOAD SOPs, POLICIES, GUIDES & STATION CHECKLISTS
@@ -1070,6 +1556,18 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                         <span>{isEditingThis ? 'Cancel Edit' : 'Edit Name & Position'}</span>
                       </button>
 
+                      {acc.status === 'approved' && (
+                        <button
+                          type="button"
+                          onClick={() => handleMasterIssueSingleCertForAccount(acc)}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                          title="Issue or Verify Single Official Certificate for this Staff Member"
+                        >
+                          <Award className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Verify / Issue Cert</span>
+                        </button>
+                      )}
+
                       {!isMaster && (
                         <>
                           {acc.status !== 'approved' && (
@@ -1408,6 +1906,26 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Single Certificate Preview Modal when inspecting from Master Hub */}
+      {previewCert && (
+        <TrainingCertificateModal
+          isOpen={!!previewCert}
+          onClose={() => setPreviewCert(null)}
+          staffName={previewCert.staffName}
+          staffEmail={previewCert.staffEmail}
+          staffPosition={previewCert.staffPosition}
+          staffBranch={previewCert.staffBranch}
+          quizTitle={previewCert.quizTitle}
+          score={previewCert.score}
+          totalQuestions={previewCert.totalQuestions}
+          completedAt={previewCert.issuedAt}
+          serialCode={previewCert.serialCode}
+          verificationStatus={previewCert.status}
+          readOnlyPreview={true}
+        />
+      )}
     </div>
   );
 };
+

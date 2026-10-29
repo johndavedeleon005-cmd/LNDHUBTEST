@@ -139,6 +139,61 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidCertificate(data) {
+      return data.keys().hasAll([
+          'id',
+          'serialCode',
+          'staffName',
+          'staffEmail',
+          'staffPosition',
+          'staffBranch',
+          'quizTitle',
+          'score',
+          'totalQuestions',
+          'percentage',
+          'status',
+          'issuedAt',
+          'verifiedBy',
+          'visibility',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'serialCode',
+          'staffName',
+          'staffEmail',
+          'staffPosition',
+          'staffBranch',
+          'quizTitle',
+          'score',
+          'totalQuestions',
+          'percentage',
+          'status',
+          'issuedAt',
+          'verifiedBy',
+          'visibility',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.serialCode is string && data.serialCode.size() >= 1 && data.serialCode.size() <= 64 &&
+        data.staffName is string && data.staffName.size() >= 1 && data.staffName.size() <= 120 &&
+        data.staffEmail is string && data.staffEmail.size() >= 3 && data.staffEmail.size() <= 254 &&
+        data.staffPosition is string && data.staffPosition.size() >= 1 && data.staffPosition.size() <= 120 &&
+        data.staffBranch is string && data.staffBranch.size() >= 1 && data.staffBranch.size() <= 160 &&
+        data.quizTitle is string && data.quizTitle.size() >= 1 && data.quizTitle.size() <= 240 &&
+        data.score is number && data.score >= 0 && data.score <= 1000 &&
+        data.totalQuestions is number && data.totalQuestions >= 1 && data.totalQuestions <= 1000 &&
+        data.percentage is number && data.percentage >= 0 && data.percentage <= 100 &&
+        (data.status == 'verified' || data.status == 'revoked') &&
+        data.issuedAt is string && data.issuedAt.size() >= 1 && data.issuedAt.size() <= 64 &&
+        data.verifiedBy is string && data.verifiedBy.size() >= 1 && data.verifiedBy.size() <= 160 &&
+        data.visibility == 'portal_verified' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     // 4. Collection Rules: /admins/{adminId}
     match /admins/{adminId} {
       allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
@@ -217,6 +272,42 @@ service cloud.firestore {
         ]);
 
       allow delete: if isValidId(docId);
+    }
+
+    // 7. Collection Rules: /certificates/{certId}
+    match /certificates/{certId} {
+      allow get: if isValidId(certId) && resource.data.visibility == 'portal_verified';
+      allow list: if resource.data.visibility == 'portal_verified';
+
+      allow create: if isValidId(certId) &&
+        isValidCertificate(incoming()) &&
+        incoming().id == certId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidCertificate(incoming()) &&
+        isValidId(certId) &&
+        incoming().id == existing().id &&
+        incoming().serialCode == existing().serialCode &&
+        incoming().staffEmail == existing().staffEmail &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'staffName',
+          'staffPosition',
+          'staffBranch',
+          'quizTitle',
+          'score',
+          'totalQuestions',
+          'percentage',
+          'status',
+          'issuedAt',
+          'verifiedBy',
+          'visibility',
+          'updatedAt'
+        ]);
+
+      allow delete: if isValidId(certId) && isAdmin();
     }
   }
 }

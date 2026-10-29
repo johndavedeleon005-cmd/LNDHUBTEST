@@ -218,6 +218,119 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "TrainingCertificate": {
+      "title": "TrainingCertificate",
+      "description": "Single official training competency certificate issued to a staff member and verifiable via the Master Hub.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Deterministic certificate ID (one certificate per staff member)."
+        },
+        "serialCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Unique verification serial code (e.g., IKG-LD-2026-XXXXXX)."
+        },
+        "staffName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Employee full name locked from Sign-In account."
+        },
+        "staffEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "Employee email or identifier."
+        },
+        "staffPosition": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Employee official position locked from Sign-In account."
+        },
+        "staffBranch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "Assigned Jiangnan Hotpot branch."
+        },
+        "quizTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240,
+          "description": "Title of the completed competency assessment."
+        },
+        "score": {
+          "type": "number",
+          "description": "Passing score achieved."
+        },
+        "totalQuestions": {
+          "type": "number",
+          "description": "Total questions in the assessment."
+        },
+        "percentage": {
+          "type": "number",
+          "description": "Passing percentage score (0-100)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["verified", "revoked"],
+          "description": "Master Hub verification status of the certificate."
+        },
+        "issuedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "ISO timestamp when the certificate was issued."
+        },
+        "verifiedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "L&D Team / Master Account endorsement."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["portal_verified"],
+          "description": "Visibility marker for Master Hub verification queries."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "serialCode",
+        "staffName",
+        "staffEmail",
+        "staffPosition",
+        "staffBranch",
+        "quizTitle",
+        "score",
+        "totalQuestions",
+        "percentage",
+        "status",
+        "issuedAt",
+        "verifiedBy",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -232,6 +345,10 @@
     "/custom_documents/{docId}": {
       "schema": { "$ref": "#/entities/CustomDocument" },
       "description": "Master-uploaded SOPs, Policies, Guides, and Station Checklists."
+    },
+    "/certificates/{certId}": {
+      "schema": { "$ref": "#/entities/TrainingCertificate" },
+      "description": "Single official training certificate per staff member verifiable in the Master Hub."
     }
   }
 }

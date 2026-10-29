@@ -141,3 +141,22 @@ export interface ComplianceStats {
   readCount: number;
   bookmarkedCount: number;
 }
+
+export type CertificateVerificationStatus = 'verified' | 'revoked';
+
+export interface TrainingCertificateRecord {
+  id: string;
+  serialCode: string;
+  staffName: string;
+  staffEmail: string;
+  staffPosition: string;
+  staffBranch: string;
+  quizTitle: string;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  status: CertificateVerificationStatus;
+  issuedAt: string;
+  verifiedBy: string;
+}
+

@@ -4,20 +4,17 @@ import {
   ShieldCheck,
   CheckCircle2,
   Award,
-  BookOpen,
   User,
-  Store,
   RefreshCw,
-  AlertCircle,
-  FileBadge,
   GraduationCap,
-  Users,
   Lock,
-  Briefcase,
-  Printer,
-  Sparkles,
 } from 'lucide-react';
 import { TrainingCertificateModal } from './TrainingCertificateModal';
+import {
+  generateDeterministicCertSerial,
+  getSavedSessionUser,
+  issueOrUpdateTrainingCertificate,
+} from '../services/authAndUploadService';
 
 interface StaffQuizAuditProps {
   documents: FoodSafetyDoc[];
@@ -40,11 +37,17 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
   staffName,
   staffPosition,
   staffBranch,
-  onOpenDoc,
   onOpenWelcomeModal,
   isMasterAccount = false,
   onOpenMasterHub,
 }) => {
+  const sessionUser = getSavedSessionUser();
+  const staffEmail = sessionUser?.email || '';
+  const officialSerial = generateDeterministicCertSerial(
+    staffEmail || staffName,
+    staffName
+  );
+
   // Aggregate all quiz questions across all documents
   const allQuestions = documents.flatMap((d) =>
     (d.quizQuestions || []).map((q) => ({
@@ -88,17 +91,17 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
   const readPercentage = Math.round((readDocIds.length / documents.length) * 100);
 
   const calculateScore = () => {
-    let score = 0;
+    let s = 0;
     activeQuizQuestions.forEach((q, idx) => {
-      if (userAnswers[idx] === q.answerIndex) score++;
+      if (userAnswers[idx] === q.answerIndex) s++;
     });
-    return score;
+    return s;
   };
 
   const score = calculateScore();
   const passed = score >= 8; // 8 out of 10 to pass
 
-  // Record pass result when submitted
+  // Record pass result and register single official certificate in Master Hub when submitted
   useEffect(() => {
     if (isSubmitted && passed) {
       const timestamp = new Date().toISOString();
@@ -112,8 +115,19 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
       } catch (e) {
         console.error(e);
       }
+
+      issueOrUpdateTrainingCertificate({
+        staffName,
+        staffEmail,
+        staffPosition,
+        staffBranch,
+        quizTitle: 'Food Safety, SOP & Operational Compliance Competency Assessment',
+        score,
+        totalQuestions: 10,
+        issuedAt: timestamp,
+      }).catch(() => {});
     }
-  }, [isSubmitted, passed, score]);
+  }, [isSubmitted, passed, score, staffName, staffEmail, staffPosition, staffBranch]);
 
   const handleRestartQuiz = () => {
     const shuffled = [...allQuestions].sort(() => 0.5 - Math.random());
@@ -121,6 +135,9 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
     setUserAnswers({});
     setIsSubmitted(false);
   };
+
+  const hasEarnedSingleCertificate = hasPassedHistory || (isSubmitted && passed);
+  const effectiveCertScore = isSubmitted && passed ? score : lastPassedScore;
 
   return (
     <div className="space-y-4 pb-12 animate-fadeIn">
@@ -135,7 +152,7 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
             <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
               <Lock className="w-3 h-3 text-amber-400 shrink-0" />
               <span>
-                Recorded from your Sign-In Account for official certificates. Staff cannot edit Name or Position — only the Master Account can modify via the Master Hub.
+                Recorded from your Sign-In Account for your single official certificate. Staff cannot edit Name or Position — only the Master Account can modify via the Master Hub.
               </span>
             </p>
           </div>
@@ -146,17 +163,8 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
                 onClick={onOpenMasterHub}
                 className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] flex items-center gap-1 cursor-pointer"
               >
-                <Lock className="w-3 h-3" />
-                <span>Edit Staff Names &amp; Positions in Master Hub</span>
-              </button>
-            )}
-            {hasPassedHistory && (
-              <button
-                onClick={() => setIsCertModalOpen(true)}
-                className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-amber-500/20 to-red-500/20 hover:from-amber-500/30 hover:to-red-500/30 border border-amber-500/40 text-amber-300 font-bold text-[11px] flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
-              >
-                <Award className="w-3.5 h-3.5 text-amber-400" />
-                <span>View Certificate</span>
+                <ShieldCheck className="w-3 h-3" />
+                <span>Verify Certificates &amp; Edit Profiles in Master Hub</span>
               </button>
             )}
             <span className="text-[10px] text-emerald-400 font-semibold px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/40">
@@ -168,7 +176,7 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="text-[11px] text-slate-400 font-medium flex items-center justify-between mb-1">
-              <span>Employee Full Name (For Certificates):</span>
+              <span>Employee Full Name (For Certificate):</span>
               <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-400">
                 <Lock className="w-2.5 h-2.5" />
                 <span>Locked</span>
@@ -185,7 +193,7 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
 
           <div>
             <label className="text-[11px] text-slate-400 font-medium flex items-center justify-between mb-1">
-              <span>Position / Designation (For Certificates):</span>
+              <span>Position / Designation (For Certificate):</span>
               <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-400">
                 <Lock className="w-2.5 h-2.5" />
                 <span>Locked</span>
@@ -235,6 +243,60 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
         </div>
       </div>
 
+      {/* SINGLE OFFICIAL SYSTEM CERTIFICATE CARD (Consolidated so only 1 certificate is ever shown) */}
+      {hasEarnedSingleCertificate && (
+        <div className="bg-gradient-to-br from-emerald-950 via-slate-900 to-amber-950/40 border-2 border-emerald-500/70 rounded-2xl p-5 sm:p-6 text-center space-y-3.5 shadow-2xl animate-fadeIn">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-950/80">
+            <Award className="w-8 h-8 text-emerald-400" />
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <span className="px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-950 text-emerald-300 border border-emerald-700/60 inline-flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                Single Official Competency Certificate Issued
+              </span>
+              <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-600/60">
+                Verification Serial: {officialSerial}
+              </span>
+            </div>
+            <h3 className="text-lg sm:text-2xl font-black text-white pt-1">
+              Food Safety &amp; SOP Compliance Certified!
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-300 max-w-lg mx-auto leading-relaxed">
+              <strong className="text-white">{staffName || 'Staff Member'}</strong> (
+              {staffPosition || 'Kitchen Shift Lead'}) at{' '}
+              <span className="text-amber-300">{staffBranch || 'Jiangnan Hotpot'}</span> holds the official verified certificate with a passing score of{' '}
+              <strong className="text-emerald-400">
+                {effectiveCertScore}/10 ({effectiveCertScore * 10}%)
+              </strong>
+              .
+            </p>
+          </div>
+
+          <div className="pt-1 flex flex-wrap items-center justify-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setIsCertModalOpen(true)}
+              className="px-6 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-600 to-red-600 hover:from-amber-400 hover:to-red-500 text-slate-950 font-black text-xs sm:text-sm shadow-xl shadow-amber-950/70 active:scale-95 transition-all inline-flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Award className="w-4 h-4 text-slate-950" />
+              <span>View &amp; Print Official Certificate (1 Copy)</span>
+            </button>
+
+            {isMasterAccount && onOpenMasterHub && (
+              <button
+                type="button"
+                onClick={onOpenMasterHub}
+                className="px-4 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-amber-500/50 text-amber-300 font-bold text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <span>Verify Certificate in Master Hub</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* The Learning and Development Team Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5">
         <div className="flex items-center justify-between">
@@ -256,7 +318,7 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
               </span>
               <span className="text-sm font-bold text-white">Joy Bernardo</span>
               <span className="text-[11px] text-slate-400 block mt-0.5">
-                Department Leadership & Standards
+                Department Leadership &amp; Standards
               </span>
             </div>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-950 text-red-300 border border-red-700/40">
@@ -277,7 +339,7 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-slate-400 block mt-0.5">
-                Food Safety Compliance & Kitchen Standards
+                Food Safety Compliance &amp; Kitchen Standards
               </span>
             </div>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-700/40">
@@ -313,7 +375,7 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
               </span>
               <span className="text-sm font-bold text-white">Dice Divine Torralba</span>
               <span className="text-[11px] text-slate-400 block mt-0.5">
-                Training Administration, Scheduling & Assessment Records
+                Training Administration, Scheduling &amp; Assessment Records
               </span>
             </div>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
@@ -338,37 +400,6 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
         </div>
       </div>
 
-      {/* Passed Certification Badge & System Generated Certificate Button */}
-      {isSubmitted && passed && (
-        <div className="bg-gradient-to-br from-emerald-950 via-slate-900 to-amber-950/40 border-2 border-emerald-500/70 rounded-2xl p-5 sm:p-6 text-center space-y-3.5 shadow-2xl animate-fadeIn">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-950/80">
-            <Award className="w-9 h-9 text-emerald-400" />
-          </div>
-          <div className="space-y-1">
-            <span className="px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-950 text-emerald-300 border border-emerald-700/60 inline-flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              Operational Competency Verified
-            </span>
-            <h3 className="text-lg sm:text-2xl font-black text-white">
-              Food Safety & SOP Compliance Certified!
-            </h3>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-lg mx-auto leading-relaxed">
-              <strong className="text-white">{staffName || 'Staff Member'}</strong> ({staffPosition || 'Kitchen Shift Lead'}) at <span className="text-amber-300">{staffBranch || 'Jiangnan Hotpot'}</span> has successfully passed the Shift Compliance Assessment with a verified score of <strong className="text-emerald-400">{score}/10 ({score * 10}%)</strong>.
-            </p>
-          </div>
-
-          <div className="pt-2">
-            <button
-              onClick={() => setIsCertModalOpen(true)}
-              className="w-full sm:w-auto px-7 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-600 to-red-600 hover:from-amber-400 hover:to-red-500 text-slate-950 font-black text-xs sm:text-sm shadow-xl shadow-amber-950/70 active:scale-95 transition-all inline-flex items-center justify-center gap-2"
-            >
-              <Award className="w-4 h-4 text-slate-950" />
-              <span>View & Print Official System Certificate</span>
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Comprehensive 10-Question Shift Quiz */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -378,13 +409,13 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
               <span>Shift Compliance Assessment (10 Questions)</span>
             </h3>
             <p className="text-xs text-slate-400">
-              Pass score is 8/10 to verify operational readiness and generate your certificate.
+              Pass score is 8/10 to verify operational readiness and issue your single official certificate.
             </p>
           </div>
 
           <button
             onClick={handleRestartQuiz}
-            className="flex items-center gap-1 px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+            className="flex items-center gap-1 px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
           >
             <RefreshCw className="w-3 h-3" />
             <span>New Questions</span>
@@ -462,27 +493,18 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
             <button
               onClick={() => setIsSubmitted(true)}
               disabled={Object.keys(userAnswers).length === 0}
-              className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-xs transition-all shadow-md active:scale-95"
+              className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-xs transition-all shadow-md active:scale-95 cursor-pointer"
             >
               Submit Assessment
             </button>
           ) : (
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-xs font-bold text-white">
-                Final Score: {score} / 10 ({score >= 8 ? 'Passed' : 'Needs Review'})
+                Final Score: {score} / 10 ({score >= 8 ? 'Passed — Certificate Updated Above' : 'Needs Review'})
               </span>
-              {passed && (
-                <button
-                  onClick={() => setIsCertModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-all"
-                >
-                  <Award className="w-3.5 h-3.5" />
-                  <span>View Certificate</span>
-                </button>
-              )}
               <button
                 onClick={handleRestartQuiz}
-                className="text-xs text-red-400 hover:underline font-semibold"
+                className="text-xs text-red-400 hover:underline font-semibold cursor-pointer"
               >
                 Retake Assessment
               </button>
@@ -491,18 +513,21 @@ export const StaffQuizAudit: React.FC<StaffQuizAuditProps> = ({
         </div>
       </div>
 
-      {/* Official System Training Certificate Modal */}
+      {/* Single Official System Training Certificate Modal */}
       <TrainingCertificateModal
         isOpen={isCertModalOpen}
         onClose={() => setIsCertModalOpen(false)}
         staffName={staffName}
+        staffEmail={staffEmail}
         staffPosition={staffPosition}
         staffBranch={staffBranch}
         quizTitle="Food Safety, SOP & Operational Compliance Competency Assessment"
-        score={isSubmitted && passed ? score : lastPassedScore}
+        score={effectiveCertScore}
         totalQuestions={10}
         completedAt={certCompletedAt}
+        serialCode={officialSerial}
       />
     </div>
   );
 };
+
