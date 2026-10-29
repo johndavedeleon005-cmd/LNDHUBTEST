@@ -377,6 +377,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
         password: newStaffPassword || 'Staff2026!',
         position: newStaffPosition,
         branch: newStaffBranch,
+        preserveCurrentSession: true,
       });
       const updated = await updateAccountApprovalStatus(created, 'approved', 'staff');
       setAccounts(updated);

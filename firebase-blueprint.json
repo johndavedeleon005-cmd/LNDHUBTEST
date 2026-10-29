@@ -111,7 +111,6 @@
         "ndaAccepted",
         "ndaSignature",
         "ndaAcceptedAt",
-        "credentialPass",
         "createdAt",
         "updatedAt"
       ]

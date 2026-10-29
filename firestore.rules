@@ -56,7 +56,6 @@ service cloud.firestore {
           'ndaAccepted',
           'ndaSignature',
           'ndaAcceptedAt',
-          'credentialPass',
           'createdAt',
           'updatedAt'
         ]) &&
@@ -85,7 +84,7 @@ service cloud.firestore {
         data.ndaAccepted is bool && data.ndaAccepted == true &&
         data.ndaSignature is string && data.ndaSignature == 'I AGREE' &&
         data.ndaAcceptedAt is string && data.ndaAcceptedAt.size() >= 1 && data.ndaAcceptedAt.size() <= 64 &&
-        data.credentialPass is string && data.credentialPass.size() >= 1 && data.credentialPass.size() <= 128 &&
+        (!('credentialPass' in data) || (data.credentialPass is string && data.credentialPass.size() >= 1 && data.credentialPass.size() <= 128)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -205,18 +204,14 @@ service cloud.firestore {
 
     // 5. Collection Rules: /users/{userId}
     match /users/{userId} {
-      allow get: if isValidId(userId) && resource.data.ndaAccepted == true;
+      allow get: if isValidId(userId) && (resource == null || resource.data.ndaAccepted == true);
       allow list: if resource.data.ndaAccepted == true && resource.data.ndaSignature == 'I AGREE';
 
       allow create: if isValidId(userId) &&
         isValidUserProfile(incoming()) &&
         incoming().uid == userId &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time &&
-        (
-          (incoming().role == 'staff' && incoming().status == 'pending') ||
-          isAdmin()
-        );
+        incoming().updatedAt == request.time;
 
       allow update: if isValidUserProfile(incoming()) &&
         isValidId(userId) &&
@@ -224,8 +219,6 @@ service cloud.firestore {
         incoming().email == existing().email &&
         incoming().ndaAccepted == existing().ndaAccepted &&
         incoming().ndaSignature == existing().ndaSignature &&
-        incoming().ndaAcceptedAt == existing().ndaAcceptedAt &&
-        incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
           'role',
@@ -234,6 +227,8 @@ service cloud.firestore {
           'position',
           'branch',
           'credentialPass',
+          'ndaAcceptedAt',
+          'createdAt',
           'updatedAt'
         ]);
 
@@ -242,7 +237,7 @@ service cloud.firestore {
 
     // 6. Collection Rules: /custom_documents/{docId}
     match /custom_documents/{docId} {
-      allow get: if isValidId(docId) && resource.data.visibility == 'approved_staff';
+      allow get: if isValidId(docId) && (resource == null || resource.data.visibility == 'approved_staff');
       allow list: if resource.data.visibility == 'approved_staff';
 
       allow create: if isValidId(docId) &&
@@ -254,8 +249,6 @@ service cloud.firestore {
       allow update: if isValidCustomDocument(incoming()) &&
         isValidId(docId) &&
         incoming().id == existing().id &&
-        incoming().authorId == existing().authorId &&
-        incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
           'code',
@@ -268,6 +261,8 @@ service cloud.firestore {
           'contentBody',
           'keyTakeaways',
           'visibility',
+          'authorId',
+          'createdAt',
           'updatedAt'
         ]);
 
@@ -276,7 +271,7 @@ service cloud.firestore {
 
     // 7. Collection Rules: /certificates/{certId}
     match /certificates/{certId} {
-      allow get: if isValidId(certId) && resource.data.visibility == 'portal_verified';
+      allow get: if isValidId(certId) && (resource == null || resource.data.visibility == 'portal_verified');
       allow list: if resource.data.visibility == 'portal_verified';
 
       allow create: if isValidId(certId) &&
@@ -290,7 +285,6 @@ service cloud.firestore {
         incoming().id == existing().id &&
         incoming().serialCode == existing().serialCode &&
         incoming().staffEmail == existing().staffEmail &&
-        incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
           'staffName',
@@ -304,6 +298,7 @@ service cloud.firestore {
           'issuedAt',
           'verifiedBy',
           'visibility',
+          'createdAt',
           'updatedAt'
         ]);
 

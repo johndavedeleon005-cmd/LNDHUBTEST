@@ -38,6 +38,7 @@ import {
   signInWithGoogleAccount,
   signInWithGoogleCloudDirect,
   checkCurrentAccountStatus,
+  subscribeToPortalAccounts,
 } from '../services/authAndUploadService';
 
 interface AuthGateModalProps {
@@ -114,7 +115,7 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
     googleEmail.trim().toLowerCase() === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase() ||
     googleEmail.trim().toLowerCase() === MASTER_ACCOUNT_DETAILS.email.toLowerCase();
 
-  // Automatically sync pending account to Firestore/Server and poll for Master approval every 3.5s
+  // Automatically sync pending account to Firestore/Server, listen via real-time subscription, and poll every 2.5s
   useEffect(() => {
     if (!currentUser || currentUser.role === 'master' || currentUser.status === 'approved') {
       return;
@@ -132,10 +133,23 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
       }
     };
 
+    const unsubAccounts = subscribeToPortalAccounts((accounts) => {
+      if (!mounted) return;
+      const matched = accounts.find(
+        (a) =>
+          a.uid === currentUser.uid ||
+          a.email.toLowerCase() === currentUser.email.toLowerCase()
+      );
+      if (matched && matched.status !== currentUser.status) {
+        onAuthenticated(matched);
+      }
+    });
+
     syncAndCheck();
-    const timer = setInterval(syncAndCheck, 3500);
+    const timer = setInterval(syncAndCheck, 2500);
     return () => {
       mounted = false;
+      unsubAccounts();
       clearInterval(timer);
     };
   }, [currentUser, onAuthenticated]);

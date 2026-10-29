@@ -218,47 +218,110 @@ export function saveSessionUser(user: PortalUser | null) {
   }
 }
 
+function resolveBestAccountStatus(
+  ...statuses: Array<'pending' | 'approved' | 'rejected' | string | undefined>
+): 'pending' | 'approved' | 'rejected' {
+  if (statuses.some((s) => s === 'approved')) return 'approved';
+  if (statuses.some((s) => s === 'rejected')) return 'rejected';
+  return 'pending';
+}
+
 async function syncAccountToFirestore(
   user: PortalUser & { password?: string }
 ): Promise<void> {
-  const docId = (user.uid || toDeterministicUid(user.email)).slice(0, 128);
+  const cleanEmail = user.email.trim().toLowerCase().slice(0, 254);
+  const detId = toDeterministicUid(cleanEmail);
+  const rawUid = (user.uid || detId).slice(0, 128);
   const nowIso = new Date().toISOString();
-  const payload: Record<string, any> = {
-    uid: docId,
-    email: user.email.trim().toLowerCase().slice(0, 254),
-    displayName: (user.displayName || user.email).trim().slice(0, 120),
-    position: (user.position || 'Kitchen / Service Staff').trim().slice(0, 120),
-    branch: (user.branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160),
-    role: user.role === 'master' ? 'master' : 'staff',
-    status:
-      user.status === 'approved' || user.status === 'rejected' ? user.status : 'pending',
-    ndaAccepted: true,
-    ndaSignature: 'I AGREE',
-    ndaAcceptedAt: (user.ndaAcceptedAt || user.createdAt || nowIso).slice(0, 64),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
 
-  if (user.password) {
-    payload.credentialPass = user.password.slice(0, 128);
-  }
+  const roleVal = user.role === 'master' ? 'master' : 'staff';
+  const statusVal =
+    user.status === 'approved' || user.status === 'rejected' ? user.status : 'pending';
+  const displayNameVal = (user.displayName || cleanEmail).trim().slice(0, 120);
+  const positionVal = (user.position || 'Kitchen / Service Staff').trim().slice(0, 120);
+  const branchVal = (user.branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160);
+  const ndaAcceptedAtVal = (user.ndaAcceptedAt || user.createdAt || nowIso).slice(0, 64);
 
+  const targetIds = new Set<string>([rawUid, detId].filter(Boolean));
+
+  // Also discover any existing Firestore user documents with the same email (e.g. Google Auth UID vs deterministic UID)
   try {
-    await setDoc(doc(db, 'users', docId), payload, { merge: true });
+    const q = query(
+      collection(db, 'users'),
+      where('ndaAccepted', '==', true),
+      where('ndaSignature', '==', 'I AGREE')
+    );
+    const snap = await getDocs(q);
+    snap.forEach((docSnap) => {
+      const d = docSnap.data();
+      if (d && String(d.email || '').trim().toLowerCase() === cleanEmail) {
+        targetIds.add(docSnap.id);
+      }
+    });
   } catch {
-    // Also try deterministic ID if user.uid was different
+    // ignore
   }
 
-  const detId = toDeterministicUid(user.email);
-  if (detId !== docId) {
+  for (const cid of Array.from(targetIds)) {
     try {
-      await setDoc(
-        doc(db, 'users', detId),
-        { ...payload, uid: detId },
-        { merge: true }
-      );
+      const docRef = doc(db, 'users', cid);
+      const existingSnap = await getDoc(docRef);
+      if (existingSnap.exists()) {
+        const updatePayload: Record<string, any> = {
+          displayName: displayNameVal,
+          position: positionVal,
+          branch: branchVal,
+          role: roleVal,
+          status: statusVal,
+          updatedAt: serverTimestamp(),
+        };
+        if (user.password) {
+          updatePayload.credentialPass = user.password.slice(0, 128);
+        }
+        await updateDoc(docRef, updatePayload);
+      } else {
+        const createPayload: Record<string, any> = {
+          uid: cid,
+          email: cleanEmail,
+          displayName: displayNameVal,
+          position: positionVal,
+          branch: branchVal,
+          role: roleVal,
+          status: statusVal,
+          ndaAccepted: true,
+          ndaSignature: 'I AGREE',
+          ndaAcceptedAt: ndaAcceptedAtVal,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (user.password) {
+          createPayload.credentialPass = user.password.slice(0, 128);
+        }
+        await setDoc(docRef, createPayload);
+      }
     } catch {
-      // ignore
+      try {
+        const fallbackPayload: Record<string, any> = {
+          uid: cid,
+          email: cleanEmail,
+          displayName: displayNameVal,
+          position: positionVal,
+          branch: branchVal,
+          role: roleVal,
+          status: statusVal,
+          ndaAccepted: true,
+          ndaSignature: 'I AGREE',
+          ndaAcceptedAt: ndaAcceptedAtVal,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (user.password) {
+          fallbackPayload.credentialPass = user.password.slice(0, 128);
+        }
+        await setDoc(doc(db, 'users', cid), fallbackPayload, { merge: true });
+      } catch {
+        // ignore
+      }
     }
   }
 }
@@ -296,6 +359,8 @@ export async function signInWithCredentials(
     return masterUser;
   }
 
+  let matchedUser: PortalUser | null = null;
+
   // 2. Check Firebase Firestore /users so cross-device accounts work everywhere
   try {
     const detUid = toDeterministicUid(cleanId);
@@ -304,14 +369,15 @@ export async function signInWithCredentials(
       const d = snap.data();
       if (!d.credentialPass || d.credentialPass === cleanPw) {
         const nowIso = new Date().toISOString();
-        const fsUser: PortalUser = {
+        matchedUser = {
           uid: d.uid || detUid,
           email: d.email || cleanId,
           displayName: d.displayName || cleanId,
           position: d.position || 'Staff',
           branch: d.branch || 'Jiangnan Hotpot',
           role: d.role === 'master' ? 'master' : 'staff',
-          status: d.status || 'pending',
+          status:
+            d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending',
           ndaAccepted: true,
           ndaSignature: d.ndaSignature || 'I AGREE',
           ndaAcceptedAt: d.ndaAcceptedAt || nowIso,
@@ -319,15 +385,13 @@ export async function signInWithCredentials(
           updatedAt: nowIso,
           authProvider: 'staff_credentials',
         };
-        saveSessionUser(fsUser);
-        return fsUser;
       }
     }
   } catch {
     // ignore and continue
   }
 
-  // 3. Check Express API
+  // 3. Check Express API and merge status
   try {
     const res = await apiFetch('/api/auth/login', {
       method: 'POST',
@@ -337,28 +401,53 @@ export async function signInWithCredentials(
     if (res && res.ok) {
       const data = await res.json();
       if (data.user) {
-        saveSessionUser(data.user);
-        return data.user;
+        matchedUser = matchedUser
+          ? {
+              ...matchedUser,
+              ...data.user,
+              status: resolveBestAccountStatus(matchedUser.status, data.user.status),
+              role:
+                matchedUser.role === 'master' || data.user.role === 'master'
+                  ? 'master'
+                  : 'staff',
+            }
+          : data.user;
       }
     }
   } catch {
     // continue to local check
   }
 
-  // 4. Local fallback check
+  // 4. Local fallback / merge check
   const localAccs = getLocalAccounts();
-  const matched = localAccs.find(
+  const matchedLocal = localAccs.find(
     (a) => a.email.toLowerCase() === cleanId || a.uid.toLowerCase() === cleanId
   );
-  if (!matched || (matched.password && matched.password !== cleanPw)) {
+  if (matchedLocal && (!matchedLocal.password || matchedLocal.password === cleanPw)) {
+    const { password: _pw, ...safeLocal } = matchedLocal;
+    matchedUser = matchedUser
+      ? {
+          ...matchedUser,
+          ...safeLocal,
+          status: resolveBestAccountStatus(matchedUser.status, safeLocal.status),
+          role:
+            matchedUser.role === 'master' || safeLocal.role === 'master'
+              ? 'master'
+              : 'staff',
+        }
+      : safeLocal;
+  }
+
+  if (!matchedUser) {
     throw new Error(
       'Invalid credentials. Check your Email/ID and password, or create a new staff account for Master Account approval.'
     );
   }
 
-  const { password: _pw, ...safeUser } = matched;
-  saveSessionUser(safeUser);
-  return safeUser;
+  // Cross-check latest status across all stores before returning
+  const verifiedUser = await checkCurrentAccountStatus(matchedUser);
+  saveSessionUser(verifiedUser);
+  return verifiedUser;
 }
 
 export async function registerStaffAccount(params: {
@@ -368,6 +457,7 @@ export async function registerStaffAccount(params: {
   position: string;
   branch: string;
   ndaSignature?: string;
+  preserveCurrentSession?: boolean;
 }): Promise<PortalUser> {
   const cleanSig = String(params.ndaSignature || 'I AGREE').trim().toUpperCase();
   if (cleanSig !== 'I AGREE') {
@@ -383,6 +473,25 @@ export async function registerStaffAccount(params: {
   const deterministicUid = toDeterministicUid(cleanEmail);
   const nowIso = new Date().toISOString();
 
+  // Check if account already exists in local storage or Firestore as approved so we never downgrade an approved account
+  const localAccs = getLocalAccounts();
+  const existingIdx = localAccs.findIndex(
+    (a) => a.email.toLowerCase() === cleanEmail || a.uid === deterministicUid
+  );
+  let priorStatus: 'pending' | 'approved' | 'rejected' = isMaster ? 'approved' : 'pending';
+  if (existingIdx >= 0 && localAccs[existingIdx].status === 'approved') {
+    priorStatus = 'approved';
+  }
+
+  try {
+    const snap = await getDoc(doc(db, 'users', deterministicUid));
+    if (snap.exists() && snap.data()?.status === 'approved') {
+      priorStatus = 'approved';
+    }
+  } catch {
+    // ignore
+  }
+
   const newEntry: PortalUser & { password?: string } = {
     uid: deterministicUid,
     email: cleanEmail,
@@ -391,7 +500,7 @@ export async function registerStaffAccount(params: {
     position: (params.position || 'Kitchen / Service Staff').trim().slice(0, 120),
     branch: (params.branch || 'Jiangnan Hotpot - SM Mall of Asia').trim().slice(0, 160),
     role: isMaster ? 'master' : 'staff',
-    status: isMaster ? 'approved' : 'pending',
+    status: priorStatus,
     ndaAccepted: true,
     ndaSignature: 'I AGREE',
     ndaAcceptedAt: nowIso,
@@ -401,16 +510,11 @@ export async function registerStaffAccount(params: {
   };
 
   // 1. Save to LocalStorage and broadcast across tabs
-  const localAccs = getLocalAccounts();
-  const existingIdx = localAccs.findIndex(
-    (a) => a.email.toLowerCase() === cleanEmail || a.uid === deterministicUid
-  );
   if (existingIdx >= 0) {
     localAccs[existingIdx] = {
       ...localAccs[existingIdx],
       ...newEntry,
-      status:
-        localAccs[existingIdx].status === 'approved' ? 'approved' : newEntry.status,
+      status: resolveBestAccountStatus(localAccs[existingIdx].status, newEntry.status),
     };
   } else {
     localAccs.push(newEntry);
@@ -435,9 +539,15 @@ export async function registerStaffAccount(params: {
     if (res && res.ok) {
       const data = await res.json();
       if (data.user) {
+        const mergedUser: PortalUser = {
+          ...data.user,
+          status: resolveBestAccountStatus(newEntry.status, data.user.status),
+        };
         broadcastAccountSync();
-        saveSessionUser(data.user);
-        return data.user;
+        if (!params.preserveCurrentSession) {
+          saveSessionUser(mergedUser);
+        }
+        return mergedUser;
       }
     }
   } catch {
@@ -446,7 +556,9 @@ export async function registerStaffAccount(params: {
 
   broadcastAccountSync();
   const { password: _pw, ...safeUser } = newEntry;
-  saveSessionUser(safeUser);
+  if (!params.preserveCurrentSession) {
+    saveSessionUser(safeUser);
+  }
   return safeUser;
 }
 
@@ -463,20 +575,28 @@ export async function signInWithGoogleAccount(
 
   let firestoreProfile: PortalUser | null = null;
   const userDocPath = `users/${fbUser.uid}`;
+  const detUid = toDeterministicUid(email);
   const nowIso = new Date().toISOString();
 
   try {
     const snap = await getDoc(doc(db, 'users', fbUser.uid));
-    if (snap.exists()) {
-      const d = snap.data();
+    const detSnap = detUid !== fbUser.uid ? await getDoc(doc(db, 'users', detUid)) : null;
+
+    if (snap.exists() || (detSnap && detSnap.exists())) {
+      const d = snap.exists() ? snap.data()! : detSnap!.data()!;
+      const secondaryData = snap.exists() && detSnap?.exists() ? detSnap.data() : null;
+      const resolvedStatus = isMaster
+        ? 'approved'
+        : resolveBestAccountStatus(d.status, secondaryData?.status);
+
       firestoreProfile = {
         uid: d.uid || fbUser.uid,
         email: d.email || email,
-        displayName: d.displayName || fbUser.displayName || email,
-        position: d.position || defaultPosition,
-        branch: d.branch || defaultBranch,
-        role: isMaster ? 'master' : d.role || 'staff',
-        status: isMaster ? 'approved' : d.status || 'pending',
+        displayName: d.displayName || secondaryData?.displayName || fbUser.displayName || email,
+        position: d.position || secondaryData?.position || defaultPosition,
+        branch: d.branch || secondaryData?.branch || defaultBranch,
+        role: isMaster ? 'master' : d.role || secondaryData?.role || 'staff',
+        status: resolvedStatus,
         ndaAccepted: true,
         ndaSignature: d.ndaSignature || 'I AGREE',
         ndaAcceptedAt: d.ndaAcceptedAt || nowIso,
@@ -541,8 +661,14 @@ export async function signInWithGoogleAccount(
       if (data.user) {
         firestoreProfile = {
           ...data.user,
-          role: isMaster ? 'master' : firestoreProfile?.role || data.user.role,
-          status: isMaster ? 'approved' : firestoreProfile?.status || data.user.status,
+          ...(firestoreProfile || {}),
+          role:
+            isMaster || firestoreProfile?.role === 'master' || data.user.role === 'master'
+              ? 'master'
+              : 'staff',
+          status: isMaster
+            ? 'approved'
+            : resolveBestAccountStatus(firestoreProfile?.status, data.user.status),
           ndaAccepted: true,
           ndaSignature: 'I AGREE',
         };
@@ -552,7 +678,7 @@ export async function signInWithGoogleAccount(
     // ignore
   }
 
-  const finalUser: PortalUser = firestoreProfile || {
+  const baseUser: PortalUser = firestoreProfile || {
     uid: fbUser.uid,
     email,
     displayName: fbUser.displayName || email.split('@')[0],
@@ -568,14 +694,7 @@ export async function signInWithGoogleAccount(
     authProvider: 'google',
   };
 
-  const localAccs = getLocalAccounts();
-  const idx = localAccs.findIndex((a) => a.uid === finalUser.uid || a.email === finalUser.email);
-  if (idx >= 0) {
-    localAccs[idx] = { ...localAccs[idx], ...finalUser };
-  } else {
-    localAccs.push(finalUser);
-  }
-  saveLocalAccounts(localAccs);
+  const finalUser = await checkCurrentAccountStatus(baseUser);
   saveSessionUser(finalUser);
   broadcastAccountSync();
 
@@ -613,9 +732,11 @@ export async function signInWithGoogleCloudDirect(params: {
     return signInWithCredentials(cleanEmail, cleanPw);
   }
 
-  // Check if this Google email already exists in Firebase Firestore
+  // Check if this Google email already exists in Firebase Firestore, Express, or LocalStorage
   const detUid = toDeterministicUid(cleanEmail);
   const nowIso = new Date().toISOString();
+
+  let foundExisting: PortalUser | null = null;
 
   try {
     const snap = await getDoc(doc(db, 'users', detUid));
@@ -624,7 +745,7 @@ export async function signInWithGoogleCloudDirect(params: {
       if (d.credentialPass && params.password && d.credentialPass !== params.password.trim()) {
         throw new Error('Incorrect password for this registered Google account.');
       }
-      const existingUser: PortalUser = {
+      foundExisting = {
         uid: d.uid || detUid,
         email: d.email || cleanEmail,
         displayName: d.displayName || params.displayName || cleanEmail.split('@')[0],
@@ -640,14 +761,28 @@ export async function signInWithGoogleCloudDirect(params: {
         updatedAt: nowIso,
         authProvider: 'google',
       };
-      saveSessionUser(existingUser);
-      broadcastAccountSync();
-      return existingUser;
     }
   } catch (err: any) {
     if (err.message?.includes('Incorrect password')) {
       throw err;
     }
+  }
+
+  if (!foundExisting) {
+    const localMatch = getLocalAccounts().find(
+      (a) => a.email.toLowerCase() === cleanEmail || a.uid === detUid
+    );
+    if (localMatch) {
+      const { password: _pw, ...safe } = localMatch;
+      foundExisting = safe;
+    }
+  }
+
+  if (foundExisting) {
+    const verifiedExisting = await checkCurrentAccountStatus(foundExisting);
+    saveSessionUser(verifiedExisting);
+    broadcastAccountSync();
+    return verifiedExisting;
   }
 
   // If account doesn't exist yet, require "I AGREE" and register directly in Firestore
@@ -681,6 +816,7 @@ export async function signOutPortalUser() {
 
 export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
   const merged = new Map<string, PortalUser>();
+  const firestoreStatusByEmail = new Map<string, string>();
 
   const upsertAccount = (acc: PortalUser) => {
     const key = acc.email.trim().toLowerCase();
@@ -695,20 +831,16 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
       return;
     }
 
-    // Prefer non-pending status if one source already recorded Master approval/rejection
-    const resolvedStatus =
-      acc.status !== 'pending'
-        ? acc.status
-        : existing.status !== 'pending'
-        ? existing.status
-        : 'pending';
-
+    const resolvedStatus = resolveBestAccountStatus(existing.status, acc.status);
     const resolvedRole =
       acc.role === 'master' || existing.role === 'master' ? 'master' : 'staff';
 
     merged.set(key, {
       ...existing,
       ...acc,
+      displayName: acc.displayName || existing.displayName,
+      position: acc.position || existing.position,
+      branch: acc.branch || existing.branch,
       role: resolvedRole,
       status: resolvedStatus,
       ndaAccepted: true,
@@ -749,16 +881,20 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
     snap.forEach((docSnap) => {
       const d = docSnap.data();
       if (d && d.email) {
+        const cleanEmail = String(d.email).trim().toLowerCase();
+        const docStatus =
+          d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending';
+        firestoreStatusByEmail.set(cleanEmail, docStatus);
+
         const nowIso = new Date().toISOString();
         upsertAccount({
           uid: d.uid || docSnap.id,
-          email: d.email,
-          displayName: d.displayName || d.email,
+          email: cleanEmail,
+          displayName: d.displayName || cleanEmail,
           position: d.position || 'Staff',
           branch: d.branch || 'Jiangnan Hotpot',
           role: d.role === 'master' ? 'master' : 'staff',
-          status:
-            d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending',
+          status: docStatus,
           ndaAccepted: true,
           ndaSignature: d.ndaSignature || 'I AGREE',
           ndaAcceptedAt: d.ndaAcceptedAt || nowIso,
@@ -772,6 +908,28 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
     // ignore if offline
   }
 
+  // Self-heal any account that was approved in Master Hub (Express/LocalStorage) but still had 'pending' in Firestore
+  for (const [emailKey, mergedAcc] of merged.entries()) {
+    const fsStatus = firestoreStatusByEmail.get(emailKey);
+    if (mergedAcc.status !== 'pending' && fsStatus === 'pending') {
+      syncAccountToFirestore(mergedAcc).catch(() => {});
+      apiFetch('/api/auth/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetUid: mergedAcc.uid,
+          email: mergedAcc.email,
+          displayName: mergedAcc.displayName,
+          position: mergedAcc.position,
+          branch: mergedAcc.branch,
+          ndaSignature: mergedAcc.ndaSignature || 'I AGREE',
+          status: mergedAcc.status,
+          role: mergedAcc.role,
+        }),
+      }).catch(() => {});
+    }
+  }
+
   // Sort so pending accounts appear right at the top for the Master Account
   const list = Array.from(merged.values()).sort((a, b) => {
     if (a.status === 'pending' && b.status !== 'pending') return -1;
@@ -779,14 +937,37 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
     return (b.createdAt || '').localeCompare(a.createdAt || '');
   });
 
+  const currentLocal = getLocalAccounts();
   saveLocalAccounts(
     list.map((u) => {
-      const existingLocal = getLocalAccounts().find(
+      const existingLocal = currentLocal.find(
         (la) => la.email.toLowerCase() === u.email.toLowerCase()
       );
       return { ...u, password: existingLocal?.password };
     })
   );
+
+  // Also keep active session user in sync if their status or profile changed
+  const activeSession = getSavedSessionUser();
+  if (activeSession) {
+    const matchedSession = list.find(
+      (u) =>
+        u.uid === activeSession.uid ||
+        u.email.toLowerCase() === activeSession.email.toLowerCase()
+    );
+    if (
+      matchedSession &&
+      (matchedSession.status !== activeSession.status ||
+        matchedSession.displayName !== activeSession.displayName ||
+        matchedSession.position !== activeSession.position ||
+        matchedSession.branch !== activeSession.branch)
+    ) {
+      saveSessionUser({
+        ...activeSession,
+        ...matchedSession,
+      });
+    }
+  }
 
   return list;
 }
@@ -808,7 +989,7 @@ export function subscribeToPortalAccounts(
   // Initial load
   refresh();
 
-  // 1. Live Firestore listener for instant cross-device account registration notifications
+  // 1. Live Firestore listener for instant cross-device account registration & approval notifications
   let unsubFirestore: (() => void) | null = null;
   try {
     const q = query(
@@ -850,8 +1031,8 @@ export function subscribeToPortalAccounts(
     window.addEventListener('storage', handleStorage);
   }
 
-  // 4. Periodic 4-second poll as rock-solid fallback
-  const intervalId = setInterval(refresh, 4000);
+  // 4. Periodic 3-second poll as rock-solid fallback
+  const intervalId = setInterval(refresh, 3000);
 
   return () => {
     active = false;
@@ -871,13 +1052,16 @@ export async function updateAccountApprovalStatus(
 ): Promise<PortalUser[]> {
   const nextRole = role || targetUser.role;
   const nowIso = new Date().toISOString();
+  const cleanEmail = targetUser.email.trim().toLowerCase();
 
   // 1. Update local store
   const localAccs = getLocalAccounts();
   let foundLocal = false;
+  let storedPassword: string | undefined;
   const updatedLocal = localAccs.map((a) => {
-    if (a.uid === targetUser.uid || a.email.toLowerCase() === targetUser.email.toLowerCase()) {
+    if (a.uid === targetUser.uid || a.email.toLowerCase() === cleanEmail) {
       foundLocal = true;
+      storedPassword = a.password;
       return {
         ...a,
         status,
@@ -897,9 +1081,25 @@ export async function updateAccountApprovalStatus(
   }
   saveLocalAccounts(updatedLocal);
 
-  // 2. ALWAYS update Firestore /users (works for both Master credential login & Google login)
+  // If the currently signed-in session matches this user, update their session immediately
+  const activeSession = getSavedSessionUser();
+  if (
+    activeSession &&
+    (activeSession.uid === targetUser.uid ||
+      activeSession.email.toLowerCase() === cleanEmail)
+  ) {
+    saveSessionUser({
+      ...activeSession,
+      status,
+      role: nextRole,
+      updatedAt: nowIso,
+    });
+  }
+
+  // 2. ALWAYS update Firestore /users (updates all matching UIDs for this email using updateDoc/setDoc)
   await syncAccountToFirestore({
     ...targetUser,
+    password: storedPassword,
     status,
     role: nextRole,
     updatedAt: nowIso,
@@ -959,12 +1159,14 @@ export async function updateStaffProfileByMaster(
   // 1. Update local accounts list
   const localAccs = getLocalAccounts();
   let foundLocal = false;
+  let storedPassword: string | undefined;
   const updatedLocal = localAccs.map((a) => {
     if (
       a.uid === targetUser.uid ||
       a.email.toLowerCase() === targetUser.email.toLowerCase()
     ) {
       foundLocal = true;
+      storedPassword = a.password;
       return {
         ...a,
         displayName: cleanName,
@@ -1000,28 +1202,11 @@ export async function updateStaffProfileByMaster(
     });
   }
 
-  // 2. Update Firebase Firestore /users/{uid}
-  const detUid = toDeterministicUid(targetUser.email);
-  const candidateIds = Array.from(new Set([targetUser.uid, detUid].filter(Boolean)));
-  for (const cid of candidateIds) {
-    try {
-      await setDoc(
-        doc(db, 'users', cid),
-        {
-          displayName: cleanName,
-          position: cleanPosition,
-          branch: cleanBranch,
-          status: nextStatus,
-          role: nextRole,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    } catch {
-      // Fallback to full syncAccountToFirestore if document didn't exist yet
-      await syncAccountToFirestore(updatedAccount);
-    }
-  }
+  // 2. Update Firebase Firestore /users/{uid} via syncAccountToFirestore
+  await syncAccountToFirestore({
+    ...updatedAccount,
+    password: storedPassword,
+  });
 
   // 3. Update Express backend
   try {
@@ -1070,58 +1255,62 @@ export async function updateStaffProfileByMaster(
 export async function checkCurrentAccountStatus(user: PortalUser): Promise<PortalUser> {
   const cleanEmail = user.email.trim().toLowerCase();
   const detUid = toDeterministicUid(cleanEmail);
+  const isMaster =
+    user.role === 'master' ||
+    cleanEmail === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
+    cleanEmail === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase();
 
-  // 1. Check Firebase Firestore first (tried by both user.uid and deterministic UID)
+  let firestoreRecord = null as Partial<PortalUser> | null;
+  let expressRecord = null as Partial<PortalUser> | null;
+  let localRecord = null as Partial<PortalUser> | null;
+
+  const mergeFirestoreData = (docId: string, d: Record<string, any>) => {
+    const docStatus =
+      d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending';
+    const prev = firestoreRecord;
+    firestoreRecord = {
+      uid: d.uid || docId,
+      email: d.email || cleanEmail,
+      displayName: d.displayName || prev?.displayName || user.displayName,
+      position: d.position || prev?.position || user.position,
+      branch: d.branch || prev?.branch || user.branch,
+      role: d.role === 'master' || prev?.role === 'master' ? 'master' : 'staff',
+      status: resolveBestAccountStatus(prev?.status, docStatus),
+    };
+  };
+
+  // 1. Check Firebase Firestore (by user.uid, deterministic UID, and email query)
   const candidateIds = Array.from(new Set([user.uid, detUid].filter(Boolean)));
   for (const cid of candidateIds) {
     try {
       const snap = await getDoc(doc(db, 'users', cid));
       if (snap.exists()) {
-        const d = snap.data();
-        const resolved: PortalUser = {
-          ...user,
-          uid: d.uid || cid,
-          displayName: d.displayName || user.displayName,
-          position: d.position || user.position,
-          branch: d.branch || user.branch,
-          role: d.role === 'master' ? 'master' : 'staff',
-          status:
-            d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending',
-          ndaAccepted: true,
-          ndaSignature: d.ndaSignature || 'I AGREE',
-        };
-        saveSessionUser(resolved);
-        return resolved;
+        mergeFirestoreData(cid, snap.data());
       }
     } catch {
       // ignore
     }
   }
 
-  // Self-healing: If the pending user's account was created before Firestore sync was added,
-  // push it to Firestore and the server right now so the Master Account immediately sees it!
-  if (user.status === 'pending') {
-    await syncAccountToFirestore(user);
-    try {
-      await apiFetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uid: user.uid || detUid,
-          email: user.email,
-          displayName: user.displayName,
-          position: user.position,
-          branch: user.branch,
-          ndaSignature: 'I AGREE',
-          syncOnly: true,
-        }),
-      });
-    } catch {
-      // ignore
-    }
+  // Also scan Firestore /users collection by email in case the account was stored under a different UID
+  try {
+    const q = query(
+      collection(db, 'users'),
+      where('ndaAccepted', '==', true),
+      where('ndaSignature', '==', 'I AGREE')
+    );
+    const snap = await getDocs(q);
+    snap.forEach((docSnap) => {
+      const d = docSnap.data();
+      if (d && String(d.email || '').trim().toLowerCase() === cleanEmail) {
+        mergeFirestoreData(docSnap.id, d);
+      }
+    });
+  } catch {
+    // ignore
   }
 
-  // 2. Check Express backend status endpoint
+  // 2. Check Express backend status endpoint (always check even if Firestore had a record!)
   try {
     const res = await apiFetch(
       `/api/auth/status/${encodeURIComponent(user.uid)}?email=${encodeURIComponent(cleanEmail)}`
@@ -1129,26 +1318,125 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
     if (res && res.ok) {
       const data = await res.json();
       if (data.user) {
-        saveSessionUser(data.user);
-        return data.user;
+        expressRecord = data.user;
       }
     }
   } catch {
     // ignore
   }
 
-  // 3. Check local storage
+  // 3. Check local storage accounts list
   const localAccs = getLocalAccounts();
-  const found = localAccs.find(
+  const foundLocal = localAccs.find(
     (a) => a.uid === user.uid || a.email.toLowerCase() === cleanEmail
   );
-  if (found) {
-    const { password: _pw, ...safe } = found;
-    saveSessionUser(safe);
-    return safe;
+  if (foundLocal) {
+    const { password: _pw, ...safe } = foundLocal;
+    localRecord = safe;
   }
 
-  return user;
+  // 4. Merge across all 3 sources — if ANY source recorded Master approval, reflect 'approved' immediately!
+  const resolvedStatus = isMaster
+    ? 'approved'
+    : resolveBestAccountStatus(
+        firestoreRecord?.status,
+        expressRecord?.status,
+        localRecord?.status,
+        user.status
+      );
+
+  const resolvedRole: 'master' | 'staff' =
+    isMaster ||
+    firestoreRecord?.role === 'master' ||
+    expressRecord?.role === 'master' ||
+    localRecord?.role === 'master'
+      ? 'master'
+      : 'staff';
+
+  const resolvedUser: PortalUser = {
+    ...user,
+    uid: firestoreRecord?.uid || expressRecord?.uid || localRecord?.uid || user.uid || detUid,
+    email: cleanEmail,
+    displayName:
+      firestoreRecord?.displayName ||
+      expressRecord?.displayName ||
+      localRecord?.displayName ||
+      user.displayName,
+    position:
+      firestoreRecord?.position ||
+      expressRecord?.position ||
+      localRecord?.position ||
+      user.position,
+    branch:
+      firestoreRecord?.branch ||
+      expressRecord?.branch ||
+      localRecord?.branch ||
+      user.branch,
+    role: resolvedRole,
+    status: resolvedStatus,
+    ndaAccepted: true,
+    ndaSignature: 'I AGREE',
+  };
+
+  // Update LocalStorage & active session with the resolved status
+  const updatedLocalAccs = getLocalAccounts();
+  const localIdx = updatedLocalAccs.findIndex(
+    (a) => a.uid === resolvedUser.uid || a.email.toLowerCase() === cleanEmail
+  );
+  if (localIdx >= 0) {
+    updatedLocalAccs[localIdx] = {
+      ...updatedLocalAccs[localIdx],
+      ...resolvedUser,
+    };
+  } else {
+    updatedLocalAccs.push(resolvedUser);
+  }
+  saveLocalAccounts(updatedLocalAccs);
+  saveSessionUser(resolvedUser);
+
+  // Self-healing:
+  // A) If resolvedStatus is 'approved' or 'rejected' (e.g. approved in Express/Local while Firestore was 'pending', or vice versa),
+  // synchronize the approved status across both Firestore and Express so all stores match!
+  if (
+    resolvedStatus !== 'pending' &&
+    (firestoreRecord?.status !== resolvedStatus || expressRecord?.status !== resolvedStatus)
+  ) {
+    syncAccountToFirestore(resolvedUser).catch(() => {});
+    apiFetch('/api/auth/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUid: resolvedUser.uid,
+        email: resolvedUser.email,
+        displayName: resolvedUser.displayName,
+        position: resolvedUser.position,
+        branch: resolvedUser.branch,
+        ndaSignature: 'I AGREE',
+        status: resolvedStatus,
+        role: resolvedRole,
+      }),
+    }).catch(() => {});
+  }
+
+  // B) If resolvedStatus is still 'pending' and missing from Firestore or Express, push it so Master Hub sees it
+  if (resolvedStatus === 'pending' && (!firestoreRecord || !expressRecord)) {
+    syncAccountToFirestore(resolvedUser).catch(() => {});
+    apiFetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: resolvedUser.uid,
+        email: resolvedUser.email,
+        displayName: resolvedUser.displayName,
+        position: resolvedUser.position,
+        branch: resolvedUser.branch,
+        ndaSignature: 'I AGREE',
+        syncOnly: true,
+      }),
+    }).catch(() => {});
+  }
+
+  return resolvedUser;
 }
 
 // ============================================================================
