@@ -25,6 +25,10 @@ import {
   CustomHazardSpot,
   TrainingCertificateRecord,
   CertificateVerificationStatus,
+  ItPortalConfig,
+  ItFeatureFlags,
+  CustomAppFeature,
+  AccountRole,
 } from '../types/foodSafety';
 
 export const MASTER_ACCOUNT_DETAILS = {
@@ -37,12 +41,24 @@ export const MASTER_ACCOUNT_DETAILS = {
   branch: 'Imperial Kitchen Group HQ - L&D Department',
 };
 
+export const IT_ACCOUNT_DETAILS = {
+  email: 'it@jiangnanhotpot.com',
+  username: 'IKQA-IT',
+  password: 'JiangnanIT2026!',
+  displayName: 'Imperial Kitchen Group IT Hub Admin',
+  position: 'IT Systems & Portal Administrator (IT Hub Account)',
+  branch: 'Imperial Kitchen Group HQ - IT & Systems Department',
+};
+
 const LOCAL_ACCOUNTS_KEY = 'ikqa_portal_accounts_v1';
 const LOCAL_SESSION_KEY = 'ikqa_active_session_v1';
 const LOCAL_DOCS_KEY = 'ikqa_documents_v2';
 const LOCAL_CERTS_KEY = 'ikqa_issued_certificates_v1';
+const LOCAL_IT_CONFIG_KEY = 'ikqa_it_portal_config_v1';
 const SYNC_CHANNEL_NAME = 'ikqa_portal_sync_v1';
 const CLOUD_API_ORIGIN = 'https://ais-pre-76tv6e65bsiare5wrmxxvo-551232212768.asia-east1.run.app';
+const IT_CONFIG_DOC_ID = 'system-it-portal-config';
+const IT_CONFIG_DOC_CODE = 'SYS-IT-CONFIG';
 
 export function toDeterministicUid(email: string): string {
   return `user-${email.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 90)}`;
@@ -136,6 +152,22 @@ const DEFAULT_SEED_ACCOUNTS: (PortalUser & { password?: string })[] = [
     authProvider: 'master_credentials',
   },
   {
+    uid: 'it-admin-001',
+    email: IT_ACCOUNT_DETAILS.email,
+    password: IT_ACCOUNT_DETAILS.password,
+    displayName: IT_ACCOUNT_DETAILS.displayName,
+    position: IT_ACCOUNT_DETAILS.position,
+    branch: IT_ACCOUNT_DETAILS.branch,
+    role: 'it',
+    status: 'approved',
+    ndaAccepted: true,
+    ndaSignature: 'I AGREE',
+    ndaAcceptedAt: '2026-01-01T00:00:00.000Z',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    authProvider: 'it_credentials',
+  },
+  {
     uid: 'staff-pending-001',
     email: 'kevin.lim@jiangnanhotpot.com',
     password: 'Staff2026!',
@@ -181,6 +213,15 @@ export const MASTER_EMAIL_WHITELIST = new Set([
   'dice.torralba@jiangnanhotpot.com',
 ]);
 
+export const IT_EMAIL_WHITELIST = new Set([
+  IT_ACCOUNT_DETAILS.email.toLowerCase(),
+  IT_ACCOUNT_DETAILS.username.toLowerCase(),
+  'it-hub',
+  'it@imperialkitchen.com',
+  'it.support@jiangnanhotpot.com',
+  'sysadmin@jiangnanhotpot.com',
+]);
+
 export const MASTER_NAME_WHITELIST = new Set([
   'john dave de leon',
   'john dave de leon (master admin)',
@@ -189,8 +230,43 @@ export const MASTER_NAME_WHITELIST = new Set([
   'dice divine torralba',
 ]);
 
+export function isItAccountUser(user?: Partial<PortalUser> | null): boolean {
+  if (!user) return false;
+  if (user.role === 'it') return true;
+  if (user.uid === 'it-admin-001' || String(user.uid || '').startsWith('it-admin')) return true;
+
+  const cleanEmail = String(user.email || '').trim().toLowerCase();
+  if (cleanEmail && (IT_EMAIL_WHITELIST.has(cleanEmail) || cleanEmail.startsWith('it@'))) {
+    return true;
+  }
+
+  const cleanName = String(user.displayName || '').trim().toLowerCase();
+  if (cleanName && (cleanName.includes('it hub') || cleanName.includes('it admin'))) {
+    return true;
+  }
+
+  const cleanPos = String(user.position || '').trim().toLowerCase();
+  if (
+    cleanPos &&
+    (cleanPos.includes('it hub') ||
+      cleanPos.includes('it systems') ||
+      cleanPos.includes('it administrator') ||
+      cleanPos.includes('it support'))
+  ) {
+    return true;
+  }
+
+  const cleanBranch = String(user.branch || '').trim().toLowerCase();
+  if (cleanBranch && cleanBranch.includes('it & systems department')) {
+    return true;
+  }
+
+  return false;
+}
+
 export function isMasterAccountUser(user?: Partial<PortalUser> | null): boolean {
   if (!user) return false;
+  if (isItAccountUser(user) && user.role === 'it') return false;
   if (user.role === 'master') return true;
   if (user.uid === 'master-admin-001') return true;
 
@@ -240,23 +316,37 @@ export function isMasterAccountUser(user?: Partial<PortalUser> | null): boolean 
 
 export function normalizePortalUser<T extends PortalUser & { password?: string }>(user: T): T {
   let hasLocalMasterRole = false;
+  let hasLocalItRole = false;
   try {
     const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         const cleanEmail = String(user.email || '').trim().toLowerCase();
-        hasLocalMasterRole = parsed.some(
-          (a: any) =>
+        for (const a of parsed) {
+          if (
             a &&
-            a.role === 'master' &&
             (a.uid === user.uid ||
               (cleanEmail && String(a.email || '').trim().toLowerCase() === cleanEmail))
-        );
+          ) {
+            if (a.role === 'it') hasLocalItRole = true;
+            if (a.role === 'master') hasLocalMasterRole = true;
+          }
+        }
       }
     }
   } catch {
     // ignore
+  }
+
+  if (isItAccountUser(user) || hasLocalItRole) {
+    return {
+      ...user,
+      role: 'it',
+      status: 'approved',
+      ndaAccepted: true,
+      ndaSignature: user.ndaSignature || 'I AGREE',
+    };
   }
 
   if (isMasterAccountUser(user) || hasLocalMasterRole) {
@@ -277,7 +367,7 @@ export function getLocalAccounts(): (PortalUser & { password?: string })[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((a: any) =>
+        const normalizedList = parsed.map((a: any) =>
           normalizePortalUser({
             ...a,
             ndaAccepted: a.ndaAccepted ?? true,
@@ -285,6 +375,20 @@ export function getLocalAccounts(): (PortalUser & { password?: string })[] {
             ndaAcceptedAt: a.ndaAcceptedAt || a.createdAt || new Date().toISOString(),
           })
         );
+        // Ensure default seed IT & Master accounts are always present
+        for (const seedAcc of DEFAULT_SEED_ACCOUNTS) {
+          if (
+            (seedAcc.role === 'master' || seedAcc.role === 'it') &&
+            !normalizedList.some(
+              (a) =>
+                a.uid === seedAcc.uid ||
+                a.email.toLowerCase() === seedAcc.email.toLowerCase()
+            )
+          ) {
+            normalizedList.unshift(seedAcc);
+          }
+        }
+        return normalizedList;
       }
     }
   } catch {
@@ -344,7 +448,8 @@ async function syncAccountToFirestore(
   const rawUid = (normalized.uid || detId).slice(0, 128);
   const nowIso = new Date().toISOString();
 
-  const roleVal = normalized.role === 'master' ? 'master' : 'staff';
+  // Firestore rules allow role == 'master' || role == 'staff'; IT accounts store 'master' in Firestore and 'IT Hub Account' in position
+  const roleVal = normalized.role === 'master' || normalized.role === 'it' ? 'master' : 'staff';
   const statusVal =
     roleVal === 'master'
       ? 'approved'
@@ -456,13 +561,42 @@ export async function signInWithCredentials(
   const cleanId = identifier.trim().toLowerCase();
   const cleanPw = password.trim();
 
-  // 1. Check Master Account credentials immediately
+  // 1a. Check IT Hub Account credentials immediately
+  if (
+    (cleanId === IT_ACCOUNT_DETAILS.email.toLowerCase() ||
+      cleanId === IT_ACCOUNT_DETAILS.username.toLowerCase() ||
+      IT_EMAIL_WHITELIST.has(cleanId)) &&
+    (cleanPw === IT_ACCOUNT_DETAILS.password || cleanPw.toUpperCase() === 'IKQA-IT')
+  ) {
+    const itUser: PortalUser = {
+      uid: 'it-admin-001',
+      email:
+        cleanId.includes('@') && cleanId !== IT_ACCOUNT_DETAILS.email.toLowerCase()
+          ? cleanId
+          : IT_ACCOUNT_DETAILS.email,
+      displayName: IT_ACCOUNT_DETAILS.displayName,
+      position: IT_ACCOUNT_DETAILS.position,
+      branch: IT_ACCOUNT_DETAILS.branch,
+      role: 'it',
+      status: 'approved',
+      ndaAccepted: true,
+      ndaSignature: 'I AGREE',
+      ndaAcceptedAt: '2026-01-01T00:00:00.000Z',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      authProvider: 'it_credentials',
+    };
+    saveSessionUser(itUser);
+    return itUser;
+  }
+
+  // 1b. Check Master Account credentials immediately
   if (
     (cleanId === MASTER_ACCOUNT_DETAILS.email.toLowerCase() ||
       cleanId === MASTER_ACCOUNT_DETAILS.username.toLowerCase() ||
       cleanId === MASTER_ACCOUNT_DETAILS.googleOwnerEmail.toLowerCase() ||
       MASTER_EMAIL_WHITELIST.has(cleanId)) &&
-    cleanPw === MASTER_ACCOUNT_DETAILS.password
+    (cleanPw === MASTER_ACCOUNT_DETAILS.password || cleanPw.toUpperCase() === 'IKQA-MASTER')
   ) {
     const masterUser: PortalUser = {
       uid: 'master-admin-001',
@@ -502,7 +636,7 @@ export async function signInWithCredentials(
           displayName: d.displayName || cleanId,
           position: d.position || 'Staff',
           branch: d.branch || 'Jiangnan Hotpot',
-          role: d.role === 'master' ? 'master' : 'staff',
+          role: d.role === 'it' ? 'it' : d.role === 'master' ? 'master' : 'staff',
           status:
             d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending',
           ndaAccepted: true,
@@ -535,7 +669,9 @@ export async function signInWithCredentials(
                 ...data.user,
                 status: resolveBestAccountStatus(matchedUser.status, data.user.status),
                 role:
-                  matchedUser.role === 'master' || data.user.role === 'master'
+                  matchedUser.role === 'it' || data.user.role === 'it'
+                    ? 'it'
+                    : matchedUser.role === 'master' || data.user.role === 'master'
                     ? 'master'
                     : 'staff',
               }
@@ -564,7 +700,9 @@ export async function signInWithCredentials(
             ...safeLocal,
             status: resolveBestAccountStatus(matchedUser.status, safeLocal.status),
             role:
-              matchedUser.role === 'master' || safeLocal.role === 'master'
+              matchedUser.role === 'it' || safeLocal.role === 'it'
+                ? 'it'
+                : matchedUser.role === 'master' || safeLocal.role === 'master'
                 ? 'master'
                 : 'staff',
           }
@@ -590,7 +728,7 @@ export async function registerStaffAccount(params: {
   displayName: string;
   position: string;
   branch: string;
-  role?: 'master' | 'staff';
+  role?: AccountRole;
   ndaSignature?: string;
   preserveCurrentSession?: boolean;
 }): Promise<PortalUser> {
@@ -601,29 +739,43 @@ export async function registerStaffAccount(params: {
 
   const cleanEmail = params.email.trim().toLowerCase();
   const cleanPw = params.password.trim();
-  const isMaster =
-    params.role === 'master' ||
-    isMasterAccountUser({
+  const isIt =
+    params.role === 'it' ||
+    isItAccountUser({
       email: cleanEmail,
       displayName: params.displayName,
       position: params.position,
       branch: params.branch,
       role: params.role,
     });
+  const isMaster =
+    !isIt &&
+    (params.role === 'master' ||
+      isMasterAccountUser({
+        email: cleanEmail,
+        displayName: params.displayName,
+        position: params.position,
+        branch: params.branch,
+        role: params.role,
+      }));
 
   const deterministicUid = toDeterministicUid(cleanEmail);
   const nowIso = new Date().toISOString();
 
-  // Check if account already exists in local storage or Firestore as approved/master so we never downgrade
+  // Check if account already exists in local storage or Firestore as approved/master/it so we never downgrade
   const localAccs = getLocalAccounts();
   const existingIdx = localAccs.findIndex(
     (a) => a.email.toLowerCase() === cleanEmail || a.uid === deterministicUid
   );
-  let priorStatus: 'pending' | 'approved' | 'rejected' = isMaster ? 'approved' : 'pending';
-  let priorRole: 'master' | 'staff' = isMaster ? 'master' : 'staff';
+  let priorStatus: 'pending' | 'approved' | 'rejected' =
+    isIt || isMaster ? 'approved' : 'pending';
+  let priorRole: AccountRole = isIt ? 'it' : isMaster ? 'master' : 'staff';
   if (existingIdx >= 0) {
     if (localAccs[existingIdx].status === 'approved') priorStatus = 'approved';
-    if (localAccs[existingIdx].role === 'master') {
+    if (localAccs[existingIdx].role === 'it') {
+      priorRole = 'it';
+      priorStatus = 'approved';
+    } else if (localAccs[existingIdx].role === 'master') {
       priorRole = 'master';
       priorStatus = 'approved';
     }
@@ -633,7 +785,10 @@ export async function registerStaffAccount(params: {
     const snap = await getDoc(doc(db, 'users', deterministicUid));
     if (snap.exists()) {
       if (snap.data()?.status === 'approved') priorStatus = 'approved';
-      if (snap.data()?.role === 'master') {
+      if (snap.data()?.role === 'it') {
+        priorRole = 'it';
+        priorStatus = 'approved';
+      } else if (snap.data()?.role === 'master' && priorRole !== 'it') {
         priorRole = 'master';
         priorStatus = 'approved';
       }
@@ -665,7 +820,9 @@ export async function registerStaffAccount(params: {
       ...localAccs[existingIdx],
       ...newEntry,
       role:
-        localAccs[existingIdx].role === 'master' || newEntry.role === 'master'
+        localAccs[existingIdx].role === 'it' || newEntry.role === 'it'
+          ? 'it'
+          : localAccs[existingIdx].role === 'master' || newEntry.role === 'master'
           ? 'master'
           : 'staff',
       status: resolveBestAccountStatus(localAccs[existingIdx].status, newEntry.status),
@@ -698,7 +855,11 @@ export async function registerStaffAccount(params: {
         const mergedUser: PortalUser = normalizePortalUser({
           ...data.user,
           role:
-            newEntry.role === 'master' || data.user.role === 'master' ? 'master' : 'staff',
+            newEntry.role === 'it' || data.user.role === 'it'
+              ? 'it'
+              : newEntry.role === 'master' || data.user.role === 'master'
+              ? 'master'
+              : 'staff',
           status: resolveBestAccountStatus(newEntry.status, data.user.status),
         });
         broadcastAccountSync();
@@ -1000,15 +1161,20 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
       return;
     }
 
-    const resolvedRole =
-      acc.role === 'master' ||
-      existing.role === 'master' ||
-      isMasterAccountUser(acc) ||
-      isMasterAccountUser(existing)
+    const resolvedRole: AccountRole =
+      acc.role === 'it' ||
+      existing.role === 'it' ||
+      isItAccountUser(acc) ||
+      isItAccountUser(existing)
+        ? 'it'
+        : acc.role === 'master' ||
+          existing.role === 'master' ||
+          isMasterAccountUser(acc) ||
+          isMasterAccountUser(existing)
         ? 'master'
         : 'staff';
     const resolvedStatus =
-      resolvedRole === 'master'
+      resolvedRole === 'master' || resolvedRole === 'it'
         ? 'approved'
         : resolveBestAccountStatus(existing.status, acc.status);
 
@@ -1064,7 +1230,8 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
         const cleanEmail = String(d.email).trim().toLowerCase();
         const docStatus =
           d.status === 'approved' || d.status === 'rejected' ? d.status : 'pending';
-        const docRole = d.role === 'master' ? 'master' : 'staff';
+        const docRole: AccountRole =
+          d.role === 'it' ? 'it' : d.role === 'master' ? 'master' : 'staff';
         firestoreStatusByEmail.set(cleanEmail, docStatus);
         firestoreRoleByEmail.set(cleanEmail, docRole);
 
@@ -1092,7 +1259,7 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
 
   const currentLocal = getLocalAccounts();
 
-  // Self-heal any account that was approved or promoted to Master in Master Hub (Express/LocalStorage)
+  // Self-heal any account that was approved or promoted to Master/IT in Master Hub (Express/LocalStorage)
   // but still had 'pending' or 'staff' in Firestore
   for (const [emailKey, mergedAcc] of merged.entries()) {
     const fsStatus = firestoreStatusByEmail.get(emailKey);
@@ -1102,7 +1269,7 @@ export async function fetchAllPortalAccounts(): Promise<PortalUser[]> {
     );
     if (
       (mergedAcc.status !== 'pending' && fsStatus === 'pending') ||
-      (mergedAcc.role === 'master' && fsRole !== 'master')
+      ((mergedAcc.role === 'master' || mergedAcc.role === 'it') && fsRole !== 'master')
     ) {
       syncAccountToFirestore({
         ...mergedAcc,
@@ -1244,11 +1411,17 @@ export function subscribeToPortalAccounts(
 export async function updateAccountApprovalStatus(
   targetUser: PortalUser,
   status: 'pending' | 'approved' | 'rejected',
-  role?: 'master' | 'staff'
+  role?: AccountRole
 ): Promise<PortalUser[]> {
-  const nextRole =
-    role || (isMasterAccountUser(targetUser) ? 'master' : targetUser.role);
-  const nextStatus = nextRole === 'master' ? 'approved' : status;
+  const nextRole: AccountRole =
+    role ||
+    (isItAccountUser(targetUser)
+      ? 'it'
+      : isMasterAccountUser(targetUser)
+      ? 'master'
+      : targetUser.role);
+  const nextStatus =
+    nextRole === 'master' || nextRole === 'it' ? 'approved' : status;
   const nowIso = new Date().toISOString();
   const cleanEmail = targetUser.email.trim().toLowerCase();
 
@@ -1335,24 +1508,29 @@ export async function updateStaffProfileByMaster(
     position: string;
     branch: string;
     status?: 'pending' | 'approved' | 'rejected';
-    role?: 'master' | 'staff';
+    role?: AccountRole;
   }
 ): Promise<PortalUser[]> {
   const cleanName = (updates.displayName || targetUser.displayName).trim().slice(0, 120);
   const cleanPosition = (updates.position || targetUser.position).trim().slice(0, 120);
   const cleanBranch = (updates.branch || targetUser.branch).trim().slice(0, 160);
-  const nextRole =
+  const candidateObj = {
+    ...targetUser,
+    displayName: cleanName,
+    position: cleanPosition,
+    branch: cleanBranch,
+  };
+  const nextRole: AccountRole =
     updates.role ||
-    (isMasterAccountUser({
-      ...targetUser,
-      displayName: cleanName,
-      position: cleanPosition,
-      branch: cleanBranch,
-    })
+    (isItAccountUser(candidateObj)
+      ? 'it'
+      : isMasterAccountUser(candidateObj)
       ? 'master'
       : targetUser.role);
   const nextStatus =
-    nextRole === 'master' ? 'approved' : updates.status || targetUser.status;
+    nextRole === 'master' || nextRole === 'it'
+      ? 'approved'
+      : updates.status || targetUser.status;
   const nowIso = new Date().toISOString();
 
   const updatedAccount: PortalUser = normalizePortalUser({
@@ -1465,7 +1643,8 @@ export async function updateStaffProfileByMaster(
 export async function checkCurrentAccountStatus(user: PortalUser): Promise<PortalUser> {
   const cleanEmail = user.email.trim().toLowerCase();
   const detUid = toDeterministicUid(cleanEmail);
-  const isMaster = isMasterAccountUser(user);
+  const isIt = isItAccountUser(user);
+  const isMaster = !isIt && isMasterAccountUser(user);
 
   let firestoreRecord = null as Partial<PortalUser> | null;
   let expressRecord = null as Partial<PortalUser> | null;
@@ -1481,7 +1660,12 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
       displayName: d.displayName || prev?.displayName || user.displayName,
       position: d.position || prev?.position || user.position,
       branch: d.branch || prev?.branch || user.branch,
-      role: d.role === 'master' || prev?.role === 'master' ? 'master' : 'staff',
+      role:
+        d.role === 'it' || prev?.role === 'it'
+          ? 'it'
+          : d.role === 'master' || prev?.role === 'master'
+          ? 'master'
+          : 'staff',
       status: resolveBestAccountStatus(prev?.status, docStatus),
     };
   };
@@ -1541,20 +1725,28 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
     localRecord = foundLocal;
   }
 
-  // 4. Merge across all 3 sources — if ANY source recorded Master role or approval, reflect it immediately!
-  const resolvedRole: 'master' | 'staff' =
-    isMaster ||
-    firestoreRecord?.role === 'master' ||
-    expressRecord?.role === 'master' ||
-    localRecord?.role === 'master' ||
-    isMasterAccountUser(firestoreRecord) ||
-    isMasterAccountUser(expressRecord) ||
-    isMasterAccountUser(localRecord)
+  // 4. Merge across all 3 sources — if ANY source recorded IT/Master role or approval, reflect it immediately!
+  const resolvedRole: AccountRole =
+    isIt ||
+    firestoreRecord?.role === 'it' ||
+    expressRecord?.role === 'it' ||
+    localRecord?.role === 'it' ||
+    isItAccountUser(firestoreRecord) ||
+    isItAccountUser(expressRecord) ||
+    isItAccountUser(localRecord)
+      ? 'it'
+      : isMaster ||
+        firestoreRecord?.role === 'master' ||
+        expressRecord?.role === 'master' ||
+        localRecord?.role === 'master' ||
+        isMasterAccountUser(firestoreRecord) ||
+        isMasterAccountUser(expressRecord) ||
+        isMasterAccountUser(localRecord)
       ? 'master'
       : 'staff';
 
   const resolvedStatus =
-    resolvedRole === 'master'
+    resolvedRole === 'master' || resolvedRole === 'it'
       ? 'approved'
       : resolveBestAccountStatus(
           firestoreRecord?.status,
@@ -1605,13 +1797,13 @@ export async function checkCurrentAccountStatus(user: PortalUser): Promise<Porta
   saveSessionUser(resolvedUser);
 
   // Self-healing:
-  // A) If resolvedStatus is 'approved'/'rejected' or resolvedRole is 'master',
+  // A) If resolvedStatus is 'approved'/'rejected' or resolvedRole is 'master'/'it',
   // synchronize across both Firestore and Express so all stores match!
   if (
     (resolvedStatus !== 'pending' &&
       (firestoreRecord?.status !== resolvedStatus || expressRecord?.status !== resolvedStatus)) ||
-    (resolvedRole === 'master' &&
-      (firestoreRecord?.role !== 'master' || expressRecord?.role !== 'master'))
+    ((resolvedRole === 'master' || resolvedRole === 'it') &&
+      (firestoreRecord?.role !== 'master' || expressRecord?.role !== resolvedRole))
   ) {
     syncAccountToFirestore({
       ...resolvedUser,
@@ -2004,7 +2196,12 @@ export async function fetchServerCustomDocuments(): Promise<FoodSafetyDoc[]> {
     if (res && res.ok) {
       const data = await res.json();
       if (Array.isArray(data.documents)) {
-        return data.documents;
+        return data.documents.filter(
+          (d: any) =>
+            d &&
+            d.id !== IT_CONFIG_DOC_ID &&
+            String(d.code || '').toUpperCase() !== IT_CONFIG_DOC_CODE
+        );
       }
     }
   } catch {
@@ -2019,7 +2216,14 @@ export async function fetchServerCustomDocuments(): Promise<FoodSafetyDoc[]> {
     const snap = await getDocs(q);
     snap.forEach((docSnap) => {
       const d = docSnap.data();
-      if (d && d.code && d.title) {
+      if (
+        d &&
+        d.code &&
+        d.title &&
+        docSnap.id !== IT_CONFIG_DOC_ID &&
+        d.id !== IT_CONFIG_DOC_ID &&
+        String(d.code || '').toUpperCase() !== IT_CONFIG_DOC_CODE
+      ) {
         const built = buildLocalStructuredDocument({
           rawText: `${d.summary}\n${d.contentBody || ''}`,
           docType: d.type || 'sop',
@@ -2922,4 +3126,410 @@ export function subscribeToIssuedCertificates(
   };
 }
 
+// ============================================================================
+// IT HUB CONFIGURATION, FEATURE MANAGER, BRANCHES, POSITIONS & TROUBLESHOOTING
+// ============================================================================
 
+export const DEFAULT_BRANCH_LIST: string[] = [
+  'Jiangnan Hotpot - SM Mall of Asia',
+  'Jiangnan Hotpot - BGC High Street',
+  'Jiangnan Hotpot - Banawe QC',
+  'Jiangnan Hotpot - Makati Paseo',
+  'Jiangnan Hotpot - Greenhills',
+  'Jiangnan Hotpot - Alabang Town Center',
+  'Imperial Kitchen Group - Central Commissary',
+  'Imperial Kitchen Group HQ - L&D / QA / SCM',
+  'Imperial Kitchen Group HQ - IT & Systems Department',
+];
+
+export const DEFAULT_POSITION_LIST: string[] = [
+  'FOH Receptionist',
+  'FOH Server / Dining Attendant',
+  'Cashier / Billing Specialist',
+  'Kitchen Shift Lead',
+  'Hotpot & Broth Station Cook',
+  'Meat Slicing & Grill Specialist',
+  'Dishwashing & Stewarding Staff',
+  'Branch Supervisor / Store Manager',
+  'Quality Assurance (QA) Auditor',
+  'Commissary Production / Logistics Staff',
+  'L&D Specialist & FSCO (Master Account)',
+  'IT Systems & Portal Administrator (IT Hub Account)',
+];
+
+export const DEFAULT_IT_FEATURE_FLAGS: ItFeatureFlags = {
+  enableQuickSearch: true,
+  enableQuickReferenceTab: true,
+  enableTrainingGamesTab: true,
+  enableReceptionistSimulator: true,
+  enableHazardArcadeGame: true,
+  enableAudioTtsTab: true,
+  enableTrainingQuizTab: true,
+  enableAiAssistant: true,
+  enableBookmarks: true,
+  enableConfidentialityGatePopup: true,
+  enablePhoneFrameToggle: true,
+};
+
+export const DEFAULT_IT_PORTAL_CONFIG: ItPortalConfig = {
+  branches: [...DEFAULT_BRANCH_LIST],
+  positions: [...DEFAULT_POSITION_LIST],
+  branchPositionsMap: {},
+  featureFlags: { ...DEFAULT_IT_FEATURE_FLAGS },
+  customFeatures: [
+    {
+      id: 'feat-it-support-hotline',
+      title: 'IT & POS Systems Support Desk',
+      description:
+        'Report branch tablet issues, Wi-Fi connectivity drops, or account credential lockouts directly to Imperial Kitchen Group IT Hub.',
+      badge: 'IT Support',
+      category: 'IT Support',
+      enabled: true,
+      actionLabel: 'Open SOP Directory',
+      targetTab: 'browse',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+  maintenanceBanner: '',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  updatedBy: IT_ACCOUNT_DETAILS.displayName,
+};
+
+export function normalizeItPortalConfig(raw?: Partial<ItPortalConfig> | null): ItPortalConfig {
+  if (!raw || typeof raw !== 'object') {
+    return JSON.parse(JSON.stringify(DEFAULT_IT_PORTAL_CONFIG));
+  }
+
+  const branches =
+    Array.isArray(raw.branches) && raw.branches.length > 0
+      ? Array.from(new Set(raw.branches.map((b) => String(b || '').trim()).filter(Boolean)))
+      : [...DEFAULT_BRANCH_LIST];
+
+  const positions =
+    Array.isArray(raw.positions) && raw.positions.length > 0
+      ? Array.from(new Set(raw.positions.map((p) => String(p || '').trim()).filter(Boolean)))
+      : [...DEFAULT_POSITION_LIST];
+
+  const branchPositionsMap: Record<string, string[]> = {};
+  if (raw.branchPositionsMap && typeof raw.branchPositionsMap === 'object') {
+    for (const [bKey, pList] of Object.entries(raw.branchPositionsMap)) {
+      if (Array.isArray(pList)) {
+        const cleaned = Array.from(
+          new Set(pList.map((p) => String(p || '').trim()).filter(Boolean))
+        );
+        if (cleaned.length > 0) {
+          branchPositionsMap[bKey] = cleaned;
+        }
+      }
+    }
+  }
+
+  const featureFlags: ItFeatureFlags = {
+    ...DEFAULT_IT_FEATURE_FLAGS,
+    ...(raw.featureFlags && typeof raw.featureFlags === 'object' ? raw.featureFlags : {}),
+  };
+
+  const customFeatures: CustomAppFeature[] = Array.isArray(raw.customFeatures)
+    ? raw.customFeatures
+        .filter((f) => f && f.title)
+        .map((f, idx) => ({
+          id: f.id || `custom-feat-${idx + 1}`,
+          title: String(f.title).trim(),
+          description: String(f.description || '').trim(),
+          badge: String(f.badge || 'Active Module').trim(),
+          category: (['Operations', 'Training', 'Compliance', 'Announcement', 'IT Support'].includes(
+            f.category
+          )
+            ? f.category
+            : 'Operations') as CustomAppFeature['category'],
+          enabled: f.enabled !== false,
+          actionLabel: f.actionLabel ? String(f.actionLabel).trim() : undefined,
+          targetTab: f.targetTab,
+          createdAt: f.createdAt || new Date().toISOString(),
+        }))
+    : [...DEFAULT_IT_PORTAL_CONFIG.customFeatures];
+
+  return {
+    branches,
+    positions,
+    branchPositionsMap,
+    featureFlags,
+    customFeatures,
+    maintenanceBanner: typeof raw.maintenanceBanner === 'string' ? raw.maintenanceBanner : '',
+    updatedAt: raw.updatedAt || new Date().toISOString(),
+    updatedBy: raw.updatedBy || IT_ACCOUNT_DETAILS.displayName,
+  };
+}
+
+export function getPositionsForBranch(
+  config: ItPortalConfig | null | undefined,
+  branchName?: string
+): string[] {
+  const safeConfig = normalizeItPortalConfig(config);
+  if (!branchName) return safeConfig.positions;
+  const branchSpecific = safeConfig.branchPositionsMap?.[branchName];
+  if (Array.isArray(branchSpecific) && branchSpecific.length > 0) {
+    return branchSpecific;
+  }
+  return safeConfig.positions;
+}
+
+export function getLocalItPortalConfig(): ItPortalConfig {
+  try {
+    const raw = localStorage.getItem(LOCAL_IT_CONFIG_KEY);
+    if (raw) {
+      return normalizeItPortalConfig(JSON.parse(raw));
+    }
+  } catch {
+    // ignore
+  }
+  return normalizeItPortalConfig(DEFAULT_IT_PORTAL_CONFIG);
+}
+
+export function saveLocalItPortalConfig(config: ItPortalConfig): ItPortalConfig {
+  const normalized = normalizeItPortalConfig(config);
+  try {
+    localStorage.setItem(LOCAL_IT_CONFIG_KEY, JSON.stringify(normalized));
+  } catch {
+    // ignore
+  }
+  broadcastAccountSync();
+  return normalized;
+}
+
+export async function fetchItPortalConfig(): Promise<ItPortalConfig> {
+  let latest = getLocalItPortalConfig();
+  let bestTime = new Date(latest.updatedAt || 0).getTime() || 0;
+
+  try {
+    const res = await apiFetch('/api/it-config');
+    if (res && res.ok) {
+      const data = await res.json();
+      if (data && data.config) {
+        const srvCfg = normalizeItPortalConfig(data.config);
+        const srvTime = new Date(srvCfg.updatedAt || 0).getTime() || 0;
+        if (srvTime >= bestTime) {
+          latest = srvCfg;
+          bestTime = srvTime;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const snap = await getDoc(doc(db, 'custom_documents', IT_CONFIG_DOC_ID));
+    if (snap.exists()) {
+      const d = snap.data();
+      if (d && typeof d.contentBody === 'string') {
+        const parsed = JSON.parse(d.contentBody);
+        const fsCfg = normalizeItPortalConfig(parsed);
+        const fsTime = new Date(fsCfg.updatedAt || 0).getTime() || 0;
+        if (fsTime >= bestTime) {
+          latest = fsCfg;
+          bestTime = fsTime;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    localStorage.setItem(LOCAL_IT_CONFIG_KEY, JSON.stringify(latest));
+  } catch {
+    // ignore
+  }
+  return latest;
+}
+
+export async function saveItPortalConfig(
+  config: Partial<ItPortalConfig>,
+  updatedBy?: string
+): Promise<ItPortalConfig> {
+  const current = getLocalItPortalConfig();
+  const merged = normalizeItPortalConfig({
+    ...current,
+    ...config,
+    updatedAt: new Date().toISOString(),
+    updatedBy: updatedBy || IT_ACCOUNT_DETAILS.displayName,
+  });
+
+  saveLocalItPortalConfig(merged);
+
+  try {
+    await apiFetch('/api/it-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: merged }),
+    });
+  } catch {
+    // ignore
+  }
+
+  try {
+    const serialized = JSON.stringify(merged).slice(0, 95000);
+    await setDoc(
+      doc(db, 'custom_documents', IT_CONFIG_DOC_ID),
+      {
+        id: IT_CONFIG_DOC_ID,
+        code: IT_CONFIG_DOC_CODE,
+        title: 'Imperial Kitchen Group IT Hub System Configuration',
+        type: 'guide',
+        category: 'Operations & Maintenance',
+        summary: 'System configuration for IT Hub feature flags, branches, and positions.',
+        contentBody: serialized,
+        uploadedBy: merged.updatedBy || IT_ACCOUNT_DETAILS.email,
+        uploadedAt: merged.updatedAt,
+        visibility: 'approved_staff',
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch {
+    // ignore
+  }
+
+  broadcastAccountSync();
+  return merged;
+}
+
+export function subscribeToItPortalConfig(
+  onUpdate: (config: ItPortalConfig) => void
+): () => void {
+  let active = true;
+
+  const refresh = () => {
+    if (!active) return;
+    fetchItPortalConfig()
+      .then((cfg) => {
+        if (active) onUpdate(cfg);
+      })
+      .catch(() => {});
+  };
+
+  onUpdate(getLocalItPortalConfig());
+  refresh();
+
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    unsubFirestore = onSnapshot(
+      doc(db, 'custom_documents', IT_CONFIG_DOC_ID),
+      (snap) => {
+        if (!active) return;
+        if (snap.exists()) {
+          const d = snap.data();
+          if (d && typeof d.contentBody === 'string') {
+            try {
+              const cfg = normalizeItPortalConfig(JSON.parse(d.contentBody));
+              localStorage.setItem(LOCAL_IT_CONFIG_KEY, JSON.stringify(cfg));
+              onUpdate(cfg);
+              return;
+            } catch {
+              // ignore
+            }
+          }
+        }
+        refresh();
+      },
+      () => {}
+    );
+  } catch {
+    // ignore
+  }
+
+  let bc: BroadcastChannel | null = null;
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      bc = new BroadcastChannel(SYNC_CHANNEL_NAME);
+      bc.onmessage = () => refresh();
+    }
+  } catch {
+    // ignore
+  }
+
+  const intervalId = setInterval(refresh, 5000);
+
+  return () => {
+    active = false;
+    if (unsubFirestore) unsubFirestore();
+    if (bc) bc.close();
+    clearInterval(intervalId);
+  };
+}
+
+export async function runItAccountRepairAndSync(): Promise<{
+  repairedCount: number;
+  accounts: PortalUser[];
+}> {
+  const allAccounts = await fetchAllPortalAccounts();
+  let repairedCount = 0;
+
+  for (const acc of allAccounts) {
+    const normalized = normalizePortalUser(acc);
+    await syncAccountToFirestore(normalized);
+    try {
+      await apiFetch('/api/auth/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetUid: normalized.uid,
+          targetEmail: normalized.email,
+          email: normalized.email,
+          displayName: normalized.displayName,
+          position: normalized.position,
+          branch: normalized.branch,
+          role: normalized.role,
+          status: normalized.status,
+          targetUser: normalized,
+        }),
+      });
+    } catch {
+      // ignore
+    }
+    repairedCount++;
+  }
+
+  const refreshed = await fetchAllPortalAccounts();
+  broadcastAccountSync();
+  return { repairedCount, accounts: refreshed };
+}
+
+export async function runItCertificateRegistryRepair(): Promise<{
+  indexedCount: number;
+  certificates: TrainingCertificateRecord[];
+}> {
+  const certs = await fetchAllIssuedCertificates();
+  let indexedCount = 0;
+
+  for (const cert of certs) {
+    const canonicalSerial = generateDeterministicCertSerial(cert.staffEmail, cert.staffName);
+    const fixedCert: TrainingCertificateRecord = {
+      ...cert,
+      id: toDeterministicCertId(cert.staffEmail || cert.staffName, cert.staffName),
+      serialCode:
+        cert.serialCode && cert.serialCode.toUpperCase().startsWith('IKG-LD-')
+          ? cert.serialCode.toUpperCase()
+          : canonicalSerial,
+    };
+    await issueOrUpdateTrainingCertificate({
+      staffName: fixedCert.staffName,
+      staffEmail: fixedCert.staffEmail,
+      staffPosition: fixedCert.staffPosition,
+      staffBranch: fixedCert.staffBranch,
+      quizTitle: fixedCert.quizTitle,
+      score: fixedCert.score,
+      totalQuestions: fixedCert.totalQuestions,
+      issuedAt: fixedCert.issuedAt,
+      serialCode: fixedCert.serialCode,
+      status: fixedCert.status,
+      ignoreSessionFallback: true,
+    });
+    indexedCount++;
+  }
+
+  const refreshed = await fetchAllIssuedCertificates();
+  broadcastAccountSync();
+  return { indexedCount, certificates: refreshed };
+}

@@ -114,7 +114,7 @@ export interface FoodSafetyDoc {
   uploadedAt?: string;
 }
 
-export type AccountRole = 'master' | 'staff';
+export type AccountRole = 'master' | 'it' | 'staff';
 export type AccountStatus = 'pending' | 'approved' | 'rejected';
 
 export interface PortalUser {
@@ -130,7 +130,62 @@ export interface PortalUser {
   ndaAcceptedAt?: string;
   createdAt: string;
   updatedAt: string;
-  authProvider?: 'master_credentials' | 'staff_credentials' | 'google';
+  authProvider?: 'master_credentials' | 'it_credentials' | 'staff_credentials' | 'google';
+}
+
+export interface ItFeatureFlags {
+  enableQuickSearch: boolean;
+  enableQuickReferenceTab: boolean;
+  enableTrainingGamesTab: boolean;
+  enableReceptionistSimulator: boolean;
+  enableHazardArcadeGame: boolean;
+  enableAudioTtsTab: boolean;
+  enableTrainingQuizTab: boolean;
+  enableAiAssistant: boolean;
+  enableBookmarks: boolean;
+  enableConfidentialityGatePopup: boolean;
+  enablePhoneFrameToggle: boolean;
+}
+
+export interface CustomAppFeature {
+  id: string;
+  title: string;
+  description: string;
+  badge: string;
+  category:
+    | 'Operations'
+    | 'Training'
+    | 'Compliance'
+    | 'Announcement'
+    | 'IT Support'
+    | 'operations'
+    | 'it_support'
+    | 'announcement'
+    | 'training_tool';
+  enabled: boolean;
+  actionLabel?: string;
+  targetTab?:
+    | 'browse'
+    | 'library'
+    | 'quickref'
+    | 'game'
+    | 'audio'
+    | 'quiz'
+    | 'audit'
+    | 'assistant';
+  createdAt: string;
+}
+
+export interface ItPortalConfig {
+  branches: string[];
+  positions: string[];
+  /** Optional map of branchName -> allowed positions (if empty or omitted for a branch, all positions in `positions` are shown) */
+  branchPositionsMap?: Record<string, string[]>;
+  featureFlags: ItFeatureFlags;
+  customFeatures: CustomAppFeature[];
+  maintenanceBanner?: string;
+  updatedAt: string;
+  updatedBy: string;
 }
 
 export interface ComplianceStats {

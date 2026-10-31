@@ -26,6 +26,7 @@ import {
   Award,
   Search,
   Eye,
+  Cpu,
 } from 'lucide-react';
 import {
   PortalUser,
@@ -34,9 +35,15 @@ import {
   DepartmentCategory,
   TrainingCertificateRecord,
   CertificateVerificationStatus,
+  ItPortalConfig,
+  AccountRole,
 } from '../types/foodSafety';
 import {
   MASTER_ACCOUNT_DETAILS,
+  IT_ACCOUNT_DETAILS,
+  DEFAULT_BRANCH_LIST,
+  DEFAULT_POSITION_LIST,
+  getPositionsForBranch,
   fetchAllPortalAccounts,
   subscribeToPortalAccounts,
   updateAccountApprovalStatus,
@@ -69,6 +76,8 @@ interface MasterAdminHubViewProps {
   onClearInitialCertVerifyCode?: () => void;
   initialSection?: 'approvals' | 'uploader' | 'certificates' | 'credentials' | null;
   onClearInitialSection?: () => void;
+  itConfig?: ItPortalConfig;
+  onOpenItHub?: () => void;
 }
 
 const SAMPLE_UPLOAD_TEMPLATES: {
@@ -160,7 +169,18 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   onClearInitialCertVerifyCode,
   initialSection,
   onClearInitialSection,
+  itConfig,
+  onOpenItHub,
 }) => {
+  const branchList =
+    itConfig?.branches && itConfig.branches.length > 0
+      ? itConfig.branches
+      : DEFAULT_BRANCH_LIST;
+  const positionList =
+    itConfig?.positions && itConfig.positions.length > 0
+      ? itConfig.positions
+      : DEFAULT_POSITION_LIST;
+
   const [activeSection, setActiveSection] = useState<
     'approvals' | 'uploader' | 'certificates' | 'credentials'
   >(initialSection || 'certificates');
@@ -187,13 +207,15 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   const [savingProfileUid, setSavingProfileUid] = useState<string | null>(null);
   const [savedProfileMessage, setSavedProfileMessage] = useState<string | null>(null);
 
-  // Quick Add Staff / Master Account by Master state
+  // Quick Add Staff / Master / IT Account by Master state
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPassword, setNewStaffPassword] = useState('Staff2026!');
-  const [newStaffPosition, setNewStaffPosition] = useState('FOH Receptionist');
-  const [newStaffBranch, setNewStaffBranch] = useState('Jiangnan Hotpot - SM Mall of Asia');
-  const [newStaffRole, setNewStaffRole] = useState<'staff' | 'master'>('staff');
+  const [newStaffPosition, setNewStaffPosition] = useState(positionList[0] || 'FOH Receptionist');
+  const [newStaffBranch, setNewStaffBranch] = useState(
+    branchList[0] || 'Jiangnan Hotpot - SM Mall of Asia'
+  );
+  const [newStaffRole, setNewStaffRole] = useState<AccountRole>('staff');
   const [showAddStaffForm, setShowAddStaffForm] = useState(false);
 
   // Certificate Verification & Single-Certificate Registry state
@@ -362,7 +384,7 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
   const handleApprovalAction = async (
     acc: PortalUser,
     status: 'pending' | 'approved' | 'rejected',
-    role?: 'master' | 'staff'
+    role?: AccountRole
   ) => {
     const updated = await updateAccountApprovalStatus(acc, status, role);
     setAccounts(updated);
@@ -1477,26 +1499,35 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                 />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
-                <input
-                  type="text"
-                  value={newStaffPosition}
-                  onChange={(e) => setNewStaffPosition(e.target.value)}
-                  placeholder="Position (e.g. FOH Receptionist)"
-                  className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                />
-                <input
-                  type="text"
+                <select
                   value={newStaffBranch}
                   onChange={(e) => setNewStaffBranch(e.target.value)}
-                  placeholder="Branch"
                   className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                />
+                >
+                  {branchList.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={newStaffPosition}
+                  onChange={(e) => setNewStaffPosition(e.target.value)}
+                  className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                >
+                  {getPositionsForBranch(itConfig, newStaffBranch).map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
                 <select
                   value={newStaffRole}
-                  onChange={(e) => setNewStaffRole(e.target.value as 'staff' | 'master')}
+                  onChange={(e) => setNewStaffRole(e.target.value as AccountRole)}
                   className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-300"
                 >
                   <option value="staff">Role: Staff Account</option>
+                  <option value="it">Role: IT Hub Account (Features, Branches &amp; Positions)</option>
                   <option value="master">Role: Master Account (Full Master Hub)</option>
                 </select>
                 <button
@@ -1711,26 +1742,40 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
                           <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
                             Official Position / Designation
                           </label>
-                          <input
-                            type="text"
+                          <select
                             value={editPosition}
                             onChange={(e) => setEditPosition(e.target.value)}
-                            placeholder="e.g. FOH Receptionist / Kitchen Shift Lead"
                             className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
-                          />
+                          >
+                            {!positionList.includes(editPosition) && editPosition && (
+                              <option value={editPosition}>{editPosition}</option>
+                            )}
+                            {getPositionsForBranch(itConfig, editBranch).map((pos) => (
+                              <option key={pos} value={pos}>
+                                {pos}
+                              </option>
+                            ))}
+                          </select>
                         </div>
 
                         <div>
                           <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
                             Branch / Store Location
                           </label>
-                          <input
-                            type="text"
+                          <select
                             value={editBranch}
                             onChange={(e) => setEditBranch(e.target.value)}
-                            placeholder="e.g. Jiangnan Hotpot - SM Mall of Asia"
                             className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
-                          />
+                          >
+                            {!branchList.includes(editBranch) && editBranch && (
+                              <option value={editBranch}>{editBranch}</option>
+                            )}
+                            {branchList.map((br) => (
+                              <option key={br} value={br}>
+                                {br}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
 
@@ -1932,6 +1977,64 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
               >
                 {copiedKey === 'm-google' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
               </button>
+            </div>
+          </div>
+
+          {/* Dedicated IT Hub Account Credentials & Shortcut Card */}
+          <div className="p-4 rounded-2xl bg-cyan-950/30 border border-cyan-500/40 space-y-3 text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="font-bold text-cyan-300 flex items-center gap-1.5">
+                <Cpu className="w-4 h-4 text-cyan-400" />
+                <span>Official IT Hub Account Details (Troubleshooting, Features, Branches &amp; Positions)</span>
+              </div>
+              {onOpenItHub && (
+                <button
+                  type="button"
+                  onClick={onOpenItHub}
+                  className="px-3 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+                >
+                  <Cpu className="w-3.5 h-3.5" />
+                  <span>Open IT Hub Console</span>
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-400 block">IT Hub Email</span>
+                  <span className="font-mono font-bold text-white">{IT_ACCOUNT_DETAILS.email}</span>
+                </div>
+                <button
+                  onClick={() => handleCopy(IT_ACCOUNT_DETAILS.email, 'it-email')}
+                  className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 cursor-pointer"
+                >
+                  {copiedKey === 'it-email' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-400 block">IT Hub Username / ID</span>
+                  <span className="font-mono font-bold text-cyan-300">{IT_ACCOUNT_DETAILS.username}</span>
+                </div>
+                <button
+                  onClick={() => handleCopy(IT_ACCOUNT_DETAILS.username, 'it-user')}
+                  className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 cursor-pointer"
+                >
+                  {copiedKey === 'it-user' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-400 block">IT Hub Password</span>
+                  <span className="font-mono font-bold text-emerald-400">{IT_ACCOUNT_DETAILS.password}</span>
+                </div>
+                <button
+                  onClick={() => handleCopy(IT_ACCOUNT_DETAILS.password, 'it-pw')}
+                  className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 cursor-pointer"
+                >
+                  {copiedKey === 'it-pw' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
             </div>
           </div>
 

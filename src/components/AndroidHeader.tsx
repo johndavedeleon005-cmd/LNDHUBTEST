@@ -7,11 +7,9 @@ import {
   Monitor,
   Search,
   Bookmark,
-  Flame,
   Lock,
   GraduationCap,
   X,
-  FileText,
   ChevronRight,
   Layers,
   Crown,
@@ -20,9 +18,14 @@ import {
   Award,
   Upload,
   KeyRound,
+  Cpu,
+  Sliders,
+  Building2,
+  Briefcase,
+  Wrench,
 } from 'lucide-react';
-import { FoodSafetyDoc, PortalUser } from '../types/foodSafety';
-import { isMasterAccountUser } from '../services/authAndUploadService';
+import { FoodSafetyDoc, PortalUser, ItPortalConfig } from '../types/foodSafety';
+import { isMasterAccountUser, isItAccountUser } from '../services/authAndUploadService';
 
 interface AndroidHeaderProps {
   onSearchClick: () => void;
@@ -40,6 +43,11 @@ interface AndroidHeaderProps {
   onOpenMasterHubSection?: (
     section: 'certificates' | 'approvals' | 'uploader' | 'credentials'
   ) => void;
+  onOpenItHub?: () => void;
+  onOpenItHubSection?: (
+    section: 'features' | 'branches' | 'positions' | 'troubleshooting'
+  ) => void;
+  itConfig?: ItPortalConfig;
   activeTab?: string;
   onOpenAuthModal?: () => void;
   onSignOut?: () => void;
@@ -60,12 +68,22 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
   currentUser = null,
   onOpenMasterHub,
   onOpenMasterHubSection,
+  onOpenItHub,
+  onOpenItHubSection,
+  itConfig,
   activeTab,
   onOpenAuthModal,
   onSignOut,
   pendingApprovalsCount = 0,
 }) => {
   const isMaster = isMasterAccountUser(currentUser);
+  const isIt = isItAccountUser(currentUser);
+  const flags = itConfig?.featureFlags;
+  const showQuickSearch = flags ? flags.enableQuickSearch : true;
+  const showAiAssistant = flags ? flags.enableAiAssistant : true;
+  const showBookmarks = flags ? flags.enableBookmarks : true;
+  const showPhoneToggle = flags ? flags.enablePhoneFrameToggle : true;
+
   const [time, setTime] = useState<string>('');
   const [isQuickSearchOpen, setIsQuickSearchOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState('');
@@ -91,7 +109,7 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
   // Keyboard shortcut Ctrl+K / Cmd+K to open Quick-Access Search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && showQuickSearch) {
         e.preventDefault();
         setIsQuickSearchOpen((prev) => !prev);
       } else if (e.key === 'Escape' && isQuickSearchOpen) {
@@ -100,7 +118,7 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isQuickSearchOpen]);
+  }, [isQuickSearchOpen, showQuickSearch]);
 
   useEffect(() => {
     if (isQuickSearchOpen) {
@@ -128,7 +146,6 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
     const q = quickQuery.toLowerCase().trim();
 
     if (!q) {
-      // When empty, show documents related to activeDoc (if viewing one) or top foundational docs
       if (activeDoc) {
         return documents
           .filter((d) => d.id !== activeDoc.id)
@@ -148,7 +165,6 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
       return documents.slice(0, 6);
     }
 
-    // Score documents by direct match + related category/tags
     const directMatches = documents.filter((doc) => {
       const inCode = doc.code.toLowerCase().includes(q);
       const inTitle = doc.title.toLowerCase().includes(q);
@@ -159,7 +175,6 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
       return inCode || inTitle || inCategory || inSummary || inTags || inTakeaways;
     });
 
-    // Also find related documents sharing category or tags with the top match
     if (directMatches.length > 0 && directMatches.length < 6) {
       const primaryCategories = new Set(directMatches.map((m) => m.category));
       const directIds = new Set(directMatches.map((m) => m.id));
@@ -242,18 +257,20 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
         {/* Action icons */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {/* Quick-Access Search Trigger Pill */}
-          <button
-            onClick={() => setIsQuickSearchOpen((prev) => !prev)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-semibold transition-all active:scale-95 ${
-              isQuickSearchOpen
-                ? 'bg-red-600 text-white border-red-500 shadow-md'
-                : 'bg-slate-800/90 hover:bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-600'
-            }`}
-            title="Quick-access search for related documents (Ctrl+K)"
-          >
-            <Search className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">Quick Search</span>
-          </button>
+          {showQuickSearch && (
+            <button
+              onClick={() => setIsQuickSearchOpen((prev) => !prev)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-semibold transition-all active:scale-95 ${
+                isQuickSearchOpen
+                  ? 'bg-red-600 text-white border-red-500 shadow-md'
+                  : 'bg-slate-800/90 hover:bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-600'
+              }`}
+              title="Quick-access search for related documents (Ctrl+K)"
+            >
+              <Search className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Quick Search</span>
+            </button>
+          )}
 
           {/* L&D Training Hub & Team Info */}
           {onOpenWelcomeModal && (
@@ -268,30 +285,34 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
           )}
 
           {/* L&D Virtual Support Assistant */}
-          <button
-            onClick={onOpenAssistant}
-            title="L&D Virtual Support"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-gradient-to-r from-red-600/20 to-amber-600/20 border border-red-500/30 hover:border-red-400 text-red-300 text-xs font-semibold active:scale-95 transition-all whitespace-nowrap shrink-0"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-            <span className="hidden sm:inline">L&D Virtual Support</span>
-          </button>
+          {showAiAssistant && (
+            <button
+              onClick={onOpenAssistant}
+              title="L&D Virtual Support"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-gradient-to-r from-red-600/20 to-amber-600/20 border border-red-500/30 hover:border-red-400 text-red-300 text-xs font-semibold active:scale-95 transition-all whitespace-nowrap shrink-0"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+              <span className="hidden sm:inline">L&D Virtual Support</span>
+            </button>
+          )}
 
           {/* Bookmarks */}
-          <button
-            onClick={onBookmarksClick}
-            className="p-2 rounded-full hover:bg-slate-800 text-slate-300 relative active:scale-90 transition-all"
-            title="Bookmarked documents"
-          >
-            <Bookmark className="w-4 h-4" />
-            {bookmarksCount > 0 && (
-              <span className="absolute top-1 right-1 w-4 h-4 bg-amber-500 text-slate-950 text-[10px] font-black rounded-full flex items-center justify-center">
-                {bookmarksCount}
-              </span>
-            )}
-          </button>
+          {showBookmarks && (
+            <button
+              onClick={onBookmarksClick}
+              className="p-2 rounded-full hover:bg-slate-800 text-slate-300 relative active:scale-90 transition-all"
+              title="Bookmarked documents"
+            >
+              <Bookmark className="w-4 h-4" />
+              {bookmarksCount > 0 && (
+                <span className="absolute top-1 right-1 w-4 h-4 bg-amber-500 text-slate-950 text-[10px] font-black rounded-full flex items-center justify-center">
+                  {bookmarksCount}
+                </span>
+              )}
+            </button>
+          )}
 
-          {/* Master Account Hub Button or Account Status */}
+          {/* Master Account Hub Button */}
           {isMaster && onOpenMasterHub && (
             <button
               onClick={onOpenMasterHub}
@@ -305,6 +326,18 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
                   {pendingApprovalsCount}
                 </span>
               )}
+            </button>
+          )}
+
+          {/* IT Hub Account Button */}
+          {(isIt || isMaster) && onOpenItHub && (
+            <button
+              onClick={onOpenItHub}
+              title="Open IT Hub Console (Add/Remove App Features, Edit Branch List & Positions, Troubleshooting)"
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-cyan-300 hover:from-cyan-300 hover:to-cyan-200 text-slate-950 text-xs font-black shadow-md shadow-cyan-500/20 ring-1 ring-cyan-200/60 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <Cpu className="w-3.5 h-3.5 text-slate-950 shrink-0" />
+              <span>IT Hub</span>
             </button>
           )}
 
@@ -343,13 +376,15 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
           )}
 
           {/* Desktop Frame Switcher */}
-          <button
-            onClick={togglePhoneFrame}
-            className="hidden md:flex items-center justify-center p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-all"
-            title={isPhoneFrame ? 'Switch to Full Width View' : 'Simulate Android Phone Frame'}
-          >
-            {isPhoneFrame ? <Monitor className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
-          </button>
+          {showPhoneToggle && (
+            <button
+              onClick={togglePhoneFrame}
+              className="hidden md:flex items-center justify-center p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-all"
+              title={isPhoneFrame ? 'Switch to Full Width View' : 'Simulate Android Phone Frame'}
+            >
+              {isPhoneFrame ? <Monitor className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
+            </button>
+          )}
         </div>
       </div>
 
@@ -428,12 +463,88 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
               <KeyRound className="w-3 h-3 text-amber-400" />
               <span className="hidden sm:inline">Master Credentials</span>
             </button>
+
+            {onOpenItHub && (
+              <button
+                type="button"
+                onClick={onOpenItHub}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer ${
+                  activeTab === 'it'
+                    ? 'bg-cyan-400 text-slate-950 shadow-sm'
+                    : 'bg-cyan-950/90 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/50'
+                }`}
+              >
+                <Cpu className="w-3 h-3" />
+                <span>IT Hub</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Persistent IT Hub Account Control Bar (Always Visible for IT Hub Accounts Across All Tabs) */}
+      {isIt && onOpenItHub && (
+        <div className="px-4 py-1.5 bg-gradient-to-r from-cyan-950/95 via-slate-900 to-cyan-950/90 border-t border-cyan-500/40 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-400 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+              <Cpu className="w-3 h-3 text-slate-950" />
+              <span>IT Hub Account</span>
+            </span>
+            <span className="text-[11px] font-bold text-cyan-200 hidden md:inline truncate max-w-[200px]">
+              {currentUser?.displayName}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() =>
+                onOpenItHubSection ? onOpenItHubSection('features') : onOpenItHub()
+              }
+              className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-500/50 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <Sliders className="w-3 h-3 text-cyan-300" />
+              <span>Add / Remove Features</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onOpenItHubSection ? onOpenItHubSection('branches') : onOpenItHub()
+              }
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/40 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <Building2 className="w-3 h-3 text-cyan-400" />
+              <span>Edit Branch List</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onOpenItHubSection ? onOpenItHubSection('positions') : onOpenItHub()
+              }
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <Briefcase className="w-3 h-3 text-amber-400" />
+              <span>Edit Branch Positions</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onOpenItHubSection ? onOpenItHubSection('troubleshooting') : onOpenItHub()
+              }
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <Wrench className="w-3 h-3 text-emerald-400" />
+              <span>IT Troubleshooting</span>
+            </button>
           </div>
         </div>
       )}
 
       {/* Expandable Quick-Access Related Documents Search Bar & Live Results */}
-      {isQuickSearchOpen && (
+      {isQuickSearchOpen && showQuickSearch && (
         <div className="px-4 pb-3 pt-1 bg-slate-900/98 border-t border-slate-800/80 shadow-2xl animate-in slide-in-from-top-1 duration-150">
           <div className="relative">
             <Search className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />

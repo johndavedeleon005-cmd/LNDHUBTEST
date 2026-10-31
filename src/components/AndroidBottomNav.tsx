@@ -1,7 +1,25 @@
 import React from 'react';
-import { BookOpen, Zap, Headphones, CheckSquare, Sparkles, Gamepad2, Crown } from 'lucide-react';
+import {
+  BookOpen,
+  Zap,
+  Headphones,
+  CheckSquare,
+  Sparkles,
+  Gamepad2,
+  Crown,
+  Cpu,
+} from 'lucide-react';
+import { ItFeatureFlags } from '../types/foodSafety';
 
-export type TabType = 'library' | 'quickref' | 'game' | 'audio' | 'audit' | 'assistant' | 'master';
+export type TabType =
+  | 'library'
+  | 'quickref'
+  | 'game'
+  | 'audio'
+  | 'audit'
+  | 'assistant'
+  | 'master'
+  | 'it';
 
 interface AndroidBottomNavProps {
   activeTab: TabType;
@@ -9,7 +27,9 @@ interface AndroidBottomNavProps {
   isPlayingAudio?: boolean;
   totalDocsCount?: number;
   isMasterAccount?: boolean;
+  isItAccount?: boolean;
   pendingApprovalsCount?: number;
+  featureFlags?: ItFeatureFlags;
 }
 
 export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
@@ -18,8 +38,16 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
   isPlayingAudio = false,
   totalDocsCount = 34,
   isMasterAccount = false,
+  isItAccount = false,
   pendingApprovalsCount = 0,
+  featureFlags,
 }) => {
+  const showQuickRef = featureFlags ? featureFlags.enableQuickReferenceTab : true;
+  const showGames = featureFlags ? featureFlags.enableTrainingGamesTab : true;
+  const showAudio = featureFlags ? featureFlags.enableAudioTtsTab : true;
+  const showAudit = featureFlags ? featureFlags.enableTrainingQuizTab : true;
+  const showAssistant = featureFlags ? featureFlags.enableAiAssistant : true;
+
   const tabs = [
     {
       id: 'library' as TabType,
@@ -27,34 +55,54 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
       icon: BookOpen,
       badge: String(totalDocsCount),
     },
-    {
-      id: 'quickref' as TabType,
-      label: 'Quick Ref',
-      icon: Zap,
-    },
-    {
-      id: 'game' as TabType,
-      label: '8-Bit Game',
-      icon: Gamepad2,
-      badge: 'NEW',
-    },
-    {
-      id: 'audio' as TabType,
-      label: 'Audio TTS',
-      icon: Headphones,
-      activePulse: isPlayingAudio,
-    },
-    {
-      id: 'audit' as TabType,
-      label: 'Training',
-      icon: CheckSquare,
-    },
-    {
-      id: 'assistant' as TabType,
-      label: 'L&D AI',
-      icon: Sparkles,
-      highlight: true,
-    },
+    ...(showQuickRef
+      ? [
+          {
+            id: 'quickref' as TabType,
+            label: 'Quick Ref',
+            icon: Zap,
+          },
+        ]
+      : []),
+    ...(showGames
+      ? [
+          {
+            id: 'game' as TabType,
+            label: '8-Bit Game',
+            icon: Gamepad2,
+            badge: 'NEW',
+          },
+        ]
+      : []),
+    ...(showAudio
+      ? [
+          {
+            id: 'audio' as TabType,
+            label: 'Audio TTS',
+            icon: Headphones,
+            activePulse: isPlayingAudio,
+          },
+        ]
+      : []),
+    ...(showAudit
+      ? [
+          {
+            id: 'audit' as TabType,
+            label: 'Training',
+            icon: CheckSquare,
+          },
+        ]
+      : []),
+    ...(showAssistant
+      ? [
+          {
+            id: 'assistant' as TabType,
+            label: 'L&D AI',
+            icon: Sparkles,
+            highlight: true,
+          },
+        ]
+      : []),
     ...(isMasterAccount
       ? [
           {
@@ -62,6 +110,16 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
             label: 'Master Hub',
             icon: Crown,
             badge: pendingApprovalsCount > 0 ? String(pendingApprovalsCount) : 'ADMIN',
+          },
+        ]
+      : []),
+    ...(isItAccount || isMasterAccount
+      ? [
+          {
+            id: 'it' as TabType,
+            label: 'IT Hub',
+            icon: Cpu,
+            badge: 'IT',
           },
         ]
       : []),
@@ -74,13 +132,18 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
           const isActive = activeTab === tab.id;
           const Icon = tab.icon;
           const isMasterTab = tab.id === 'master';
+          const isItTab = tab.id === 'it';
 
           return (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
               className={`flex-1 min-w-[54px] py-1.5 px-0.5 flex flex-col items-center justify-center relative group active:scale-95 transition-transform cursor-pointer ${
-                isMasterTab ? 'bg-amber-500/5 rounded-xl border border-amber-500/30 mx-0.5' : ''
+                isMasterTab
+                  ? 'bg-amber-500/5 rounded-xl border border-amber-500/30 mx-0.5'
+                  : isItTab
+                  ? 'bg-cyan-500/5 rounded-xl border border-cyan-500/30 mx-0.5'
+                  : ''
               }`}
             >
               {/* Material 3 active pill indicator */}
@@ -89,20 +152,26 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
                   isActive
                     ? isMasterTab
                       ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                      : isItTab
+                      ? 'bg-cyan-400 text-slate-950 font-black shadow-md'
                       : 'bg-red-500/20 text-red-400 font-semibold shadow-inner'
                     : isMasterTab
                     ? 'bg-amber-500/20 text-amber-300 group-hover:bg-amber-500/30'
+                    : isItTab
+                    ? 'bg-cyan-500/20 text-cyan-300 group-hover:bg-cyan-500/30'
                     : 'text-slate-400 hover:text-slate-200 group-hover:bg-slate-800/50'
                 }`}
               >
                 <Icon
                   className={`w-5 h-5 transition-transform ${
                     isActive
-                      ? isMasterTab
+                      ? isMasterTab || isItTab
                         ? 'scale-110 text-slate-950'
                         : 'scale-110 text-red-400'
                       : isMasterTab
                       ? 'text-amber-400'
+                      : isItTab
+                      ? 'text-cyan-300'
                       : 'text-slate-400'
                   } ${tab.activePulse ? 'animate-bounce text-amber-400' : ''}`}
                 />
@@ -112,6 +181,8 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
                     className={`absolute -top-1 -right-1 px-1 min-w-[15px] h-[15px] text-[9px] font-bold rounded-full flex items-center justify-center border border-slate-900 ${
                       isMasterTab
                         ? 'bg-amber-400 text-slate-950 font-black'
+                        : isItTab
+                        ? 'bg-cyan-400 text-slate-950 font-black'
                         : 'bg-red-600 text-white'
                     }`}
                   >
@@ -130,9 +201,13 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
                   isActive
                     ? isMasterTab
                       ? 'text-amber-300 font-black'
+                      : isItTab
+                      ? 'text-cyan-300 font-black'
                       : 'text-red-400 font-bold'
                     : isMasterTab
                     ? 'text-amber-300 font-bold'
+                    : isItTab
+                    ? 'text-cyan-300 font-bold'
                     : 'text-slate-400'
                 }`}
               >
@@ -145,4 +220,5 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
     </nav>
   );
 };
+
 

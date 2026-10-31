@@ -29,11 +29,17 @@ import {
   BookOpen,
   ShieldAlert,
   GraduationCap,
+  Cpu,
 } from 'lucide-react';
-import { PortalUser } from '../types/foodSafety';
+import { PortalUser, ItPortalConfig } from '../types/foodSafety';
 import {
   MASTER_ACCOUNT_DETAILS,
+  IT_ACCOUNT_DETAILS,
+  DEFAULT_BRANCH_LIST,
+  DEFAULT_POSITION_LIST,
+  getPositionsForBranch,
   isMasterAccountUser,
+  isItAccountUser,
   signInWithCredentials,
   registerStaffAccount,
   signInWithGoogleAccount,
@@ -47,38 +53,21 @@ interface AuthGateModalProps {
   onAuthenticated: (user: PortalUser) => void;
   onSignOut: () => void;
   onClose?: () => void;
+  itConfig?: ItPortalConfig;
 }
-
-const BRANCH_OPTIONS = [
-  'Jiangnan Hotpot - SM Mall of Asia',
-  'Jiangnan Hotpot - BGC High Street',
-  'Jiangnan Hotpot - Makati Paseo',
-  'Jiangnan Hotpot - Banawe QC',
-  'Jiangnan Hotpot - Greenhills',
-  'Jiangnan Hotpot - Alabang Town Center',
-  'Imperial Kitchen Central Commissary',
-  'Imperial Kitchen Group HQ - L&D Department',
-];
-
-const POSITION_OPTIONS = [
-  'FOH Receptionist',
-  'FOH Server / Service Crew',
-  'FOH Cashier',
-  'Kitchen Shift Lead',
-  'BOH Meat Slicer & Prep Cook',
-  'BOH Broth & Dispatch Specialist',
-  'Restaurant Store Manager',
-  'Commissary QA Inspector',
-  'L&D Specialist & FSCO (Master Account)',
-  'Learning & Development Manager (Master Account)',
-];
 
 export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   currentUser,
   onAuthenticated,
   onSignOut,
   onClose,
+  itConfig,
 }) => {
+  const branchOptions =
+    itConfig?.branches && itConfig.branches.length > 0
+      ? itConfig.branches
+      : DEFAULT_BRANCH_LIST;
+
   const [mode, setMode] = useState<'signin' | 'register'>('signin');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -88,9 +77,25 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
-  const [regPosition, setRegPosition] = useState(POSITION_OPTIONS[0]);
-  const [regBranch, setRegBranch] = useState(BRANCH_OPTIONS[0]);
+  const [regBranch, setRegBranch] = useState(branchOptions[0] || DEFAULT_BRANCH_LIST[0]);
+  const positionOptions = getPositionsForBranch(itConfig, regBranch);
+  const [regPosition, setRegPosition] = useState(
+    positionOptions[0] || DEFAULT_POSITION_LIST[0]
+  );
   const [regNdaTyping, setRegNdaTyping] = useState('');
+
+  useEffect(() => {
+    if (!branchOptions.includes(regBranch)) {
+      setRegBranch(branchOptions[0] || DEFAULT_BRANCH_LIST[0]);
+    }
+  }, [branchOptions, regBranch]);
+
+  useEffect(() => {
+    const branchPositions = getPositionsForBranch(itConfig, regBranch);
+    if (!branchPositions.includes(regPosition)) {
+      setRegPosition(branchPositions[0] || DEFAULT_POSITION_LIST[0]);
+    }
+  }, [itConfig, regBranch, regPosition]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -120,7 +125,12 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
 
   // Automatically sync pending account to Firestore/Server, listen via real-time subscription, and poll every 2.5s
   useEffect(() => {
-    if (!currentUser || isMasterAccountUser(currentUser) || currentUser.status === 'approved') {
+    if (
+      !currentUser ||
+      isMasterAccountUser(currentUser) ||
+      isItAccountUser(currentUser) ||
+      currentUser.status === 'approved'
+    ) {
       return;
     }
 
@@ -298,7 +308,12 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
   // =========================================================================
   // VIEW 1: ACCOUNT PENDING OR REJECTED BY MASTER ACCOUNT (STRICT LOCKOUT)
   // =========================================================================
-  if (currentUser && !isMasterAccountUser(currentUser) && currentUser.status !== 'approved') {
+  if (
+    currentUser &&
+    !isMasterAccountUser(currentUser) &&
+    !isItAccountUser(currentUser) &&
+    currentUser.status !== 'approved'
+  ) {
     const isRejected = currentUser.status === 'rejected';
 
     return (
@@ -743,6 +758,26 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                   <LogIn className="w-4 h-4" />
                   <span>{loading ? 'Authenticating...' : 'Sign In to Private L&D Hub'}</span>
                 </button>
+
+                {/* Quick Access Helper for IT Hub & Master Admin Troubleshooting */}
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+                  <span>Administrative &amp; IT Support Portals:</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIdentifier(IT_ACCOUNT_DETAILS.email);
+                        setPassword(IT_ACCOUNT_DETAILS.password);
+                        setError(null);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Fill IT Hub Account credentials for app feature toggles, branch & position editing, and troubleshooting"
+                    >
+                      <Cpu className="w-3 h-3 text-cyan-400" />
+                      <span>IT Hub Account</span>
+                    </button>
+                  </div>
+                </div>
               </form>
             ) : (
               <form onSubmit={handleRegisterSubmit} className="space-y-3">
@@ -783,26 +818,6 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="text-xs font-semibold text-slate-300 block mb-1">
-                      Position / Station Role
-                    </label>
-                    <div className="relative">
-                      <Briefcase className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <select
-                        value={regPosition}
-                        onChange={(e) => setRegPosition(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none"
-                      >
-                        {POSITION_OPTIONS.map((pos) => (
-                          <option key={pos} value={pos}>
-                            {pos}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-semibold text-slate-300 block mb-1">
                       Assigned Branch
                     </label>
                     <div className="relative">
@@ -812,9 +827,29 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                         onChange={(e) => setRegBranch(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none"
                       >
-                        {BRANCH_OPTIONS.map((br) => (
+                        {branchOptions.map((br) => (
                           <option key={br} value={br}>
                             {br}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">
+                      Position / Station Role
+                    </label>
+                    <div className="relative">
+                      <Briefcase className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <select
+                        value={regPosition}
+                        onChange={(e) => setRegPosition(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none"
+                      >
+                        {positionOptions.map((pos) => (
+                          <option key={pos} value={pos}>
+                            {pos}
                           </option>
                         ))}
                       </select>

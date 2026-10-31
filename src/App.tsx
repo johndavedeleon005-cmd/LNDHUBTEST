@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { FoodSafetyDoc, DocumentType, DepartmentCategory, PortalUser } from './types/foodSafety';
+import {
+  FoodSafetyDoc,
+  DocumentType,
+  DepartmentCategory,
+  PortalUser,
+  ItPortalConfig,
+} from './types/foodSafety';
 import { INITIAL_FOOD_SAFETY_DOCUMENTS } from './data/foodSafetyDocuments';
 import { AndroidHeader } from './components/AndroidHeader';
 import { AndroidBottomNav, TabType } from './components/AndroidBottomNav';
@@ -18,6 +24,7 @@ import { SpotTheHazardGame } from './components/SpotTheHazardGame';
 import { ReceptionistChecklistGame } from './components/ReceptionistChecklistGame';
 import { AuthGateModal } from './components/AuthGateModal';
 import { MasterAdminHubView } from './components/MasterAdminHubView';
+import { ItAdminHubView } from './components/ItAdminHubView';
 import {
   getSavedSessionUser,
   signOutPortalUser,
@@ -28,7 +35,10 @@ import {
   checkCurrentAccountStatus,
   saveDocumentsToLocalStorage,
   isMasterAccountUser,
+  isItAccountUser,
   normalizePortalUser,
+  getLocalItPortalConfig,
+  subscribeToItPortalConfig,
 } from './services/authAndUploadService';
 import {
   Search,
@@ -52,6 +62,8 @@ import {
   UserX,
   Lock,
   LogOut,
+  Cpu,
+  Megaphone,
 } from 'lucide-react';
 
 export default function App() {
@@ -64,8 +76,13 @@ export default function App() {
   const [initialMasterSection, setInitialMasterSection] = useState<
     'certificates' | 'approvals' | 'uploader' | 'credentials' | null
   >(null);
+  const [itConfig, setItConfig] = useState<ItPortalConfig>(() => getLocalItPortalConfig());
+  const [initialItSection, setInitialItSection] = useState<
+    'features' | 'branches' | 'positions' | 'troubleshooting'
+  >('features');
 
   const isMasterAccount = isMasterAccountUser(currentUser);
+  const isItAccount = isItAccountUser(currentUser);
 
   // Documents state (persisted with any custom added docs)
   const [documents, setDocuments] = useState<FoodSafetyDoc[]>(() => {
@@ -217,7 +234,15 @@ export default function App() {
   }, [isMasterAccount]);
 
   const isApprovedUser =
-    !!currentUser && (isMasterAccount || currentUser.status === 'approved');
+    !!currentUser &&
+    (isMasterAccount || isItAccount || currentUser.status === 'approved');
+
+  useEffect(() => {
+    const unsubIt = subscribeToItPortalConfig((cfg) => {
+      setItConfig(cfg);
+    });
+    return () => unsubIt();
+  }, []);
 
   useEffect(() => {
     if (isApprovedUser) {
@@ -362,6 +387,9 @@ export default function App() {
     setStaffPosition(normalized.position);
     setStaffBranch(normalized.branch);
     setIsAuthModalOpen(false);
+    if (isItAccountUser(normalized)) {
+      setActiveTab('it');
+    }
     loadPortalCustomDocs();
   };
 
@@ -422,8 +450,12 @@ export default function App() {
     setActiveTab('audio');
   };
 
-  // Confidentiality Gatekeeper: Required popup on every page / document viewed
+  // Confidentiality Gatekeeper: Required popup on every page / document viewed (unless disabled in IT Hub)
   const handleInitiateViewDoc = (doc: FoodSafetyDoc) => {
+    if (itConfig.featureFlags && !itConfig.featureFlags.enableConfidentialityGatePopup) {
+      setSelectedDoc(doc);
+      return;
+    }
     setPendingDocToView(doc);
     setPendingAction('viewDoc');
     setIsConfidentialityOpen(true);
@@ -490,13 +522,14 @@ export default function App() {
   const customUploadedCount = documents.filter((d) => d.isCustom).length;
 
   // STRICT PRIVATE HUB GATEKEEPER:
-  // Zero hub content, headers, documents, or modals are rendered unless the user is signed in AND approved (or Master Account)
+  // Zero hub content, headers, documents, or modals are rendered unless the user is signed in AND approved (or Master / IT Account)
   if (!isApprovedUser) {
     return (
       <AuthGateModal
         currentUser={currentUser}
         onAuthenticated={handleAuthenticated}
         onSignOut={handleSignOut}
+        itConfig={itConfig}
       />
     );
   }
@@ -532,6 +565,7 @@ export default function App() {
           onSelectDoc={(d) => handleInitiateViewDoc(d)}
           currentUser={currentUser}
           activeTab={activeTab}
+          itConfig={itConfig}
           onOpenMasterHub={() => {
             setSelectedDoc(null);
             setActiveTab('master');
@@ -540,6 +574,15 @@ export default function App() {
             setSelectedDoc(null);
             setInitialMasterSection(section);
             setActiveTab('master');
+          }}
+          onOpenItHub={() => {
+            setSelectedDoc(null);
+            setActiveTab('it');
+          }}
+          onOpenItHubSection={(section) => {
+            setSelectedDoc(null);
+            setInitialItSection(section);
+            setActiveTab('it');
           }}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
           onSignOut={handleSignOut}
@@ -596,6 +639,14 @@ export default function App() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => setActiveTab('it')}
+                          className="px-2.5 py-1 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Cpu className="w-3 h-3 text-cyan-400" />
+                          <span>IT Hub</span>
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => {
                             setInitialMasterSection('approvals');
                             setActiveTab('master');
@@ -606,6 +657,15 @@ export default function App() {
                           <span>Edit Staff Names/Positions in Hub</span>
                         </button>
                       </>
+                    ) : isItAccount ? (
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('it')}
+                        className="px-3 py-1 rounded-xl bg-gradient-to-r from-cyan-400 to-cyan-300 hover:from-cyan-300 hover:to-cyan-200 text-slate-950 text-[11px] font-black flex items-center gap-1 shadow-sm cursor-pointer"
+                      >
+                        <Cpu className="w-3.5 h-3.5 text-slate-950" />
+                        <span>Open IT Hub Console</span>
+                      </button>
                     ) : (
                       <span className="text-[10px] text-slate-400 font-mono hidden lg:inline">
                         Only Master Account can modify Name &amp; Position
@@ -630,6 +690,14 @@ export default function App() {
                       <span>Log Out</span>
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* IT HUB SYSTEM NOTICE / MAINTENANCE BANNER */}
+              {itConfig.maintenanceBanner && (
+                <div className="bg-amber-950/80 border border-amber-500/60 rounded-2xl px-4 py-2.5 flex items-center gap-2.5 text-xs text-amber-200 shadow-sm">
+                  <Megaphone className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="font-semibold">{itConfig.maintenanceBanner}</span>
                 </div>
               )}
 
@@ -844,61 +912,116 @@ export default function App() {
                     </div>
 
                     {/* Interactive Training Games Callout Bar (Receptionist Station Checklist + 8-Bit Kitchen Safety) */}
-                    <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <div className="flex items-center justify-between gap-2.5 bg-slate-950/90 p-3 rounded-2xl border border-amber-500/50">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center shrink-0">
-                            <ClipboardCheck className="w-5 h-5 text-amber-400" />
+                    {itConfig.featureFlags.enableTrainingGamesTab && (
+                      <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {itConfig.featureFlags.enableReceptionistSimulator && (
+                          <div className="flex items-center justify-between gap-2.5 bg-slate-950/90 p-3 rounded-2xl border border-amber-500/50">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center shrink-0">
+                                <ClipboardCheck className="w-5 h-5 text-amber-400" />
+                              </div>
+                              <div className="min-w-0">
+                                <span className="font-mono text-[10px] font-black text-amber-400 uppercase block truncate">
+                                  NEW · STATION CHECKLIST GAME
+                                </span>
+                                <p className="text-xs font-bold text-white truncate">
+                                  Receptionist &amp; Custom Simulators
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setFocusedGameDoc(null);
+                                setActiveGameMode('receptionist');
+                                setActiveTab('game');
+                              }}
+                              className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-black text-[11px] border-2 border-amber-200 shadow-[0_3px_0_#92400e] active:translate-y-0.5 transition-all flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                            >
+                              <ClipboardCheck className="w-3.5 h-3.5" />
+                              <span>PLAY FOH SIM</span>
+                            </button>
                           </div>
-                          <div className="min-w-0">
-                            <span className="font-mono text-[10px] font-black text-amber-400 uppercase block truncate">
-                              NEW · STATION CHECKLIST GAME
-                            </span>
-                            <p className="text-xs font-bold text-white truncate">
-                              Receptionist &amp; Custom Simulators
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => {
-                            setFocusedGameDoc(null);
-                            setActiveGameMode('receptionist');
-                            setActiveTab('game');
-                          }}
-                          className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-black text-[11px] border-2 border-amber-200 shadow-[0_3px_0_#92400e] active:translate-y-0.5 transition-all flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
-                        >
-                          <ClipboardCheck className="w-3.5 h-3.5" />
-                          <span>PLAY FOH SIM</span>
-                        </button>
-                      </div>
+                        )}
 
-                      <div className="flex items-center justify-between gap-2.5 bg-slate-950/80 p-3 rounded-2xl border border-red-500/40">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-9 h-9 rounded-xl bg-red-500/20 border border-red-400/50 flex items-center justify-center shrink-0">
-                            <Gamepad2 className="w-5 h-5 text-red-400" />
+                        {itConfig.featureFlags.enableHazardArcadeGame && (
+                          <div className="flex items-center justify-between gap-2.5 bg-slate-950/80 p-3 rounded-2xl border border-red-500/40">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-9 h-9 rounded-xl bg-red-500/20 border border-red-400/50 flex items-center justify-center shrink-0">
+                                <Gamepad2 className="w-5 h-5 text-red-400" />
+                              </div>
+                              <div className="min-w-0">
+                                <span className="font-mono text-[10px] font-black text-red-400 uppercase block truncate">
+                                  8-BIT KITCHEN SAFETY ARCADE
+                                </span>
+                                <p className="text-xs font-bold text-white truncate">
+                                  Spot the Hazard: BOH Kitchen
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setFocusedGameDoc(null);
+                                setActiveGameMode('hazard');
+                                setActiveTab('game');
+                              }}
+                              className="px-3 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-mono font-black text-[11px] border-2 border-red-300 shadow-[0_3px_0_#7f1d1d] active:translate-y-0.5 transition-all flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                            >
+                              <Gamepad2 className="w-3.5 h-3.5" />
+                              <span>PLAY 8-BIT</span>
+                            </button>
                           </div>
-                          <div className="min-w-0">
-                            <span className="font-mono text-[10px] font-black text-red-400 uppercase block truncate">
-                              8-BIT KITCHEN SAFETY ARCADE
-                            </span>
-                            <p className="text-xs font-bold text-white truncate">
-                              Spot the Hazard: BOH Kitchen
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => {
-                            setFocusedGameDoc(null);
-                            setActiveGameMode('hazard');
-                            setActiveTab('game');
-                          }}
-                          className="px-3 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-mono font-black text-[11px] border-2 border-red-300 shadow-[0_3px_0_#7f1d1d] active:translate-y-0.5 transition-all flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
-                        >
-                          <Gamepad2 className="w-3.5 h-3.5" />
-                          <span>PLAY 8-BIT</span>
-                        </button>
+                        )}
                       </div>
-                    </div>
+                    )}
+
+                    {/* Custom App Features / Modules Deployed via IT Hub */}
+                    {(itConfig.customFeatures || []).filter((f) => f.enabled).length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {(itConfig.customFeatures || [])
+                          .filter((f) => f.enabled)
+                          .map((feat) => {
+                            const mapTargetTab = (
+                              target?: string
+                            ): TabType => {
+                              if (target === 'quick-ref') return 'quickref';
+                              if (target === 'games') return 'game';
+                              if (target === 'audio') return 'audio';
+                              if (target === 'quiz') return 'audit';
+                              if (target === 'ai') return 'assistant';
+                              return 'library';
+                            };
+                            return (
+                              <div
+                                key={feat.id}
+                                className="flex items-center justify-between gap-2.5 bg-slate-950/90 p-3 rounded-2xl border border-cyan-500/40"
+                              >
+                                <div className="min-w-0 space-y-0.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/60 text-[9px] font-black uppercase">
+                                      {feat.badge}
+                                    </span>
+                                    <span className="text-xs font-extrabold text-white truncate">
+                                      {feat.title}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 line-clamp-2">
+                                    {feat.description}
+                                  </p>
+                                </div>
+                                {feat.actionLabel && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveTab(mapTargetTab(feat.targetTab))}
+                                    className="px-2.5 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-200 text-[10px] font-extrabold shrink-0 cursor-pointer"
+                                  >
+                                    {feat.actionLabel}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Document Type Selector Tabs */}
@@ -1223,6 +1346,8 @@ export default function App() {
                   onClearInitialCertVerifyCode={() => setInitialCertVerifyCode(null)}
                   initialSection={initialMasterSection}
                   onClearInitialSection={() => setInitialMasterSection(null)}
+                  itConfig={itConfig}
+                  onOpenItHub={() => setActiveTab('it')}
                   onOpenDoc={(d) => handleInitiateViewDoc(d)}
                   onLaunchGameWithDoc={(mode, doc) => {
                     setFocusedGameDoc(doc);
@@ -1257,6 +1382,16 @@ export default function App() {
                   }}
                 />
               )}
+
+              {/* TAB 7: IT HUB CONSOLE (ADD/REMOVE FEATURES, EDIT BRANCHES & POSITIONS, TROUBLESHOOTING) */}
+              {activeTab === 'it' && currentUser && (
+                <ItAdminHubView
+                  currentUser={currentUser}
+                  itConfig={itConfig}
+                  onItConfigChanged={(nextCfg) => setItConfig(nextCfg)}
+                  initialSection={initialItSection}
+                />
+              )}
             </div>
           )}
         </main>
@@ -1270,7 +1405,9 @@ export default function App() {
           }}
           totalDocsCount={documents.length}
           isMasterAccount={isMasterAccount}
+          isItAccount={isItAccount}
           pendingApprovalsCount={pendingApprovalsCount}
+          featureFlags={itConfig.featureFlags}
         />
 
         {/* AI Compliance Assistant Modal */}
@@ -1338,6 +1475,7 @@ export default function App() {
             onAuthenticated={handleAuthenticated}
             onSignOut={handleSignOut}
             onClose={() => setIsAuthModalOpen(false)}
+            itConfig={itConfig}
           />
         )}
       </div>
