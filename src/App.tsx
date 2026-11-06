@@ -22,6 +22,7 @@ import { StoreDocumentLockModal } from './components/StoreDocumentLockModal';
 import { WelcomeTrainingHubModal } from './components/WelcomeTrainingHubModal';
 import { SpotTheHazardGame } from './components/SpotTheHazardGame';
 import { ReceptionistChecklistGame } from './components/ReceptionistChecklistGame';
+import { FullDataComplianceGame } from './components/FullDataComplianceGame';
 import { AuthGateModal } from './components/AuthGateModal';
 import { MasterAdminHubView } from './components/MasterAdminHubView';
 import { ItAdminHubView } from './components/ItAdminHubView';
@@ -111,7 +112,8 @@ export default function App() {
 
   // Bottom navigation tab
   const [activeTab, setActiveTab] = useState<TabType>('library');
-  const [activeGameMode, setActiveGameMode] = useState<'hazard' | 'receptionist'>('receptionist');
+  const [activeGameMode, setActiveGameMode] = useState<'fullgame' | 'hazard' | 'receptionist'>('fullgame');
+  const [isFullGameViewport, setIsFullGameViewport] = useState<boolean>(true);
   const [focusedGameDoc, setFocusedGameDoc] = useState<FoodSafetyDoc | null>(null);
   const [aiFocusDoc, setAiFocusDoc] = useState<FoodSafetyDoc | null>(null);
 
@@ -911,9 +913,37 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Interactive Training Games Callout Bar (Receptionist Station Checklist + 8-Bit Kitchen Safety) */}
+                    {/* Interactive Training Games Callout Bar (All-Data FSCO Shift Commander + Receptionist + 8-Bit Kitchen Safety) */}
                     {itConfig.featureFlags.enableTrainingGamesTab && (
-                      <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div className="flex items-center justify-between gap-2.5 bg-slate-950/95 p-3 rounded-2xl border border-emerald-500/60">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/50 flex items-center justify-center shrink-0">
+                              <Gamepad2 className="w-5 h-5 text-emerald-400" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="font-mono text-[10px] font-black text-emerald-400 uppercase block truncate">
+                                SPIN THE WHEEL · 15S POP-UP QUIZ
+                              </span>
+                              <p className="text-xs font-bold text-white truncate">
+                                All-Data Wheel &amp; 15s Quiz ({documents.length} Docs)
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setFocusedGameDoc(null);
+                              setActiveGameMode('fullgame');
+                              setIsFullGameViewport(true);
+                              setActiveTab('game');
+                            }}
+                            className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-mono font-black text-[11px] border-2 border-emerald-200 shadow-[0_3px_0_#065f46] active:translate-y-0.5 transition-all flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                          >
+                            <Gamepad2 className="w-3.5 h-3.5" />
+                            <span>SPIN &amp; PLAY</span>
+                          </button>
+                        </div>
+
                         {itConfig.featureFlags.enableReceptionistSimulator && (
                           <div className="flex items-center justify-between gap-2.5 bg-slate-950/90 p-3 rounded-2xl border border-amber-500/50">
                             <div className="flex items-center gap-2.5 min-w-0">
@@ -922,7 +952,7 @@ export default function App() {
                               </div>
                               <div className="min-w-0">
                                 <span className="font-mono text-[10px] font-black text-amber-400 uppercase block truncate">
-                                  NEW · STATION CHECKLIST GAME
+                                  STATION CHECKLIST GAME
                                 </span>
                                 <p className="text-xs font-bold text-white truncate">
                                   Receptionist &amp; Custom Simulators
@@ -1238,11 +1268,27 @@ export default function App() {
               {/* TAB 2: QUICK REFERENCE */}
               {activeTab === 'quickref' && <QuickReferenceView />}
 
-              {/* TAB: TRAINING GAMES (STATION CHECKLIST GAME + 8-BIT SPOT THE HAZARD) */}
+              {/* TAB: TRAINING GAMES (ALL-DATA FSCO SHIFT COMMANDER + STATION CHECKLIST GAME + 8-BIT SPOT THE HAZARD) */}
               {activeTab === 'game' && (
                 <div className="space-y-4">
                   {/* Game Hub Switcher Bar */}
                   <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setActiveGameMode('fullgame');
+                        setIsFullGameViewport(true);
+                      }}
+                      className={`flex-1 py-2.5 px-3.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                        activeGameMode === 'fullgame'
+                          ? 'bg-gradient-to-r from-emerald-500 to-amber-400 text-slate-950 shadow-lg shadow-emerald-500/20'
+                          : 'bg-slate-950/60 text-slate-300 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <Gamepad2 className="w-4 h-4" />
+                      <span>
+                        Spin the Wheel: 15s Pop-Up Quiz ({documents.length} Docs)
+                      </span>
+                    </button>
                     <button
                       onClick={() => setActiveGameMode('receptionist')}
                       className={`flex-1 py-2.5 px-3.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
@@ -1253,7 +1299,7 @@ export default function App() {
                     >
                       <ClipboardCheck className="w-4 h-4" />
                       <span>
-                        Station Checklist Simulator (Receptionist {customUploadedCount > 0 ? `+ ${customUploadedCount} Master Uploaded` : ''})
+                        Station Checklist Simulator (Receptionist {customUploadedCount > 0 ? `+ ${customUploadedCount} Custom` : ''})
                       </span>
                     </button>
                     <button
@@ -1266,12 +1312,26 @@ export default function App() {
                     >
                       <Gamepad2 className="w-4 h-4" />
                       <span>
-                        Kitchen Safety Game: 8-Bit Spot the Hazard ({customUploadedCount > 0 ? '5 Rooms Active' : 'BOH'})
+                        8-Bit Spot the Hazard ({customUploadedCount > 0 ? '5 Rooms Active' : 'BOH'})
                       </span>
                     </button>
                   </div>
 
-                  {activeGameMode === 'receptionist' ? (
+                  {activeGameMode === 'fullgame' ? (
+                    <FullDataComplianceGame
+                      documents={documents}
+                      staffName={staffName}
+                      staffPosition={staffPosition}
+                      staffBranch={staffBranch}
+                      onOpenDoc={(d) => handleInitiateViewDoc(d)}
+                      onExitShell={() => {
+                        setIsFullGameViewport(false);
+                        setActiveTab('library');
+                      }}
+                      isFullViewport={isFullGameViewport}
+                      onToggleFullViewport={(full) => setIsFullGameViewport(full)}
+                    />
+                  ) : activeGameMode === 'receptionist' ? (
                     <ReceptionistChecklistGame
                       documents={documents}
                       staffName={staffName}
