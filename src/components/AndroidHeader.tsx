@@ -277,7 +277,7 @@ export const AndroidHeader: React.FC<AndroidHeaderProps> = ({
             <button
               onClick={onOpenWelcomeModal}
               title="Welcome to Learning and Development Training Hub & Team Info"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 hover:border-amber-400/60 text-amber-300 text-xs font-semibold active:scale-95 transition-all"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 hover:border-amber-400/60 text-amber-300 text-xs font-semibold active:scale-95 transition-all cursor-pointer"
             >
               <GraduationCap className="w-3.5 h-3.5 text-amber-400" />
               <span className="hidden sm:inline">L&D Hub</span>

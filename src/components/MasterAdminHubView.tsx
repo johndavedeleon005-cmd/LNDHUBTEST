@@ -61,6 +61,7 @@ import {
   extractCleanCertQuery,
 } from '../services/authAndUploadService';
 import { TrainingCertificateModal } from './TrainingCertificateModal';
+import { SendVideoToDriveButton } from './SendVideoToDriveButton';
 
 interface MasterAdminHubViewProps {
   currentUser: PortalUser;
@@ -610,6 +611,11 @@ export const MasterAdminHubView: React.FC<MasterAdminHubViewProps> = ({
             </div>
           </div>
         </div>
+
+        <SendVideoToDriveButton
+          compact
+          userEmailHint={MASTER_ACCOUNT_DETAILS.googleOwnerEmail}
+        />
 
         {/* Navigation Switcher inside Master Hub */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80">

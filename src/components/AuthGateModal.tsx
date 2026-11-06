@@ -47,6 +47,7 @@ import {
   checkCurrentAccountStatus,
   subscribeToPortalAccounts,
 } from '../services/authAndUploadService';
+import { SendVideoToDriveButton } from './SendVideoToDriveButton';
 
 interface AuthGateModalProps {
   currentUser: PortalUser | null;
@@ -758,26 +759,6 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                   <LogIn className="w-4 h-4" />
                   <span>{loading ? 'Authenticating...' : 'Sign In to Private L&D Hub'}</span>
                 </button>
-
-                {/* Quick Access Helper for IT Hub & Master Admin Troubleshooting */}
-                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
-                  <span>Administrative &amp; IT Support Portals:</span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIdentifier(IT_ACCOUNT_DETAILS.email);
-                        setPassword(IT_ACCOUNT_DETAILS.password);
-                        setError(null);
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                      title="Fill IT Hub Account credentials for app feature toggles, branch & position editing, and troubleshooting"
-                    >
-                      <Cpu className="w-3 h-3 text-cyan-400" />
-                      <span>IT Hub Account</span>
-                    </button>
-                  </div>
-                </div>
               </form>
             ) : (
               <form onSubmit={handleRegisterSubmit} className="space-y-3">
@@ -1102,6 +1083,11 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                 )}
               </div>
             )}
+
+            <SendVideoToDriveButton
+              compact
+              userEmailHint={MASTER_ACCOUNT_DETAILS.googleOwnerEmail}
+            />
           </div>
         </div>
       </div>
@@ -1287,6 +1273,8 @@ export const AuthGateModal: React.FC<AuthGateModalProps> = ({
                   </div>
                 </div>
               </div>
+
+              <SendVideoToDriveButton userEmailHint={MASTER_ACCOUNT_DETAILS.googleOwnerEmail} />
             </div>
 
             {/* Footer */}

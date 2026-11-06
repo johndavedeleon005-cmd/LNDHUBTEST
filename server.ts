@@ -1191,6 +1191,14 @@ app.post('/api/certificates/status', (req, res) => {
 // ============================================================================
 
 app.get('/api/it-config', (_req, res) => {
+  if (portalStore.itConfig && Array.isArray(portalStore.itConfig.customFeatures)) {
+    portalStore.itConfig.customFeatures = portalStore.itConfig.customFeatures.filter(
+      (f: any) =>
+        f &&
+        f.id !== 'feat-it-support-hotline' &&
+        !String(f.title || '').toLowerCase().includes('it & pos systems support')
+    );
+  }
   return res.json({ config: portalStore.itConfig || null });
 });
 
@@ -1199,9 +1207,18 @@ app.post('/api/it-config', (req, res) => {
   if (!config || typeof config !== 'object') {
     return res.status(400).json({ error: 'Valid IT configuration object is required.' });
   }
+  const sanitizedCustomFeatures = Array.isArray(config.customFeatures)
+    ? config.customFeatures.filter(
+        (f: any) =>
+          f &&
+          f.id !== 'feat-it-support-hotline' &&
+          !String(f.title || '').toLowerCase().includes('it & pos systems support')
+      )
+    : undefined;
   portalStore.itConfig = {
     ...(portalStore.itConfig || {}),
     ...config,
+    ...(sanitizedCustomFeatures !== undefined ? { customFeatures: sanitizedCustomFeatures } : {}),
     updatedAt: config.updatedAt || new Date().toISOString(),
   };
   savePortalStore();

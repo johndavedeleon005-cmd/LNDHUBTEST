@@ -3176,20 +3176,7 @@ export const DEFAULT_IT_PORTAL_CONFIG: ItPortalConfig = {
   positions: [...DEFAULT_POSITION_LIST],
   branchPositionsMap: {},
   featureFlags: { ...DEFAULT_IT_FEATURE_FLAGS },
-  customFeatures: [
-    {
-      id: 'feat-it-support-hotline',
-      title: 'IT & POS Systems Support Desk',
-      description:
-        'Report branch tablet issues, Wi-Fi connectivity drops, or account credential lockouts directly to Imperial Kitchen Group IT Hub.',
-      badge: 'IT Support',
-      category: 'IT Support',
-      enabled: true,
-      actionLabel: 'Open SOP Directory',
-      targetTab: 'browse',
-      createdAt: '2026-01-01T00:00:00.000Z',
-    },
-  ],
+  customFeatures: [],
   maintenanceBanner: '',
   updatedAt: '2026-01-01T00:00:00.000Z',
   updatedBy: IT_ACCOUNT_DETAILS.displayName,
@@ -3231,13 +3218,19 @@ export function normalizeItPortalConfig(raw?: Partial<ItPortalConfig> | null): I
 
   const customFeatures: CustomAppFeature[] = Array.isArray(raw.customFeatures)
     ? raw.customFeatures
-        .filter((f) => f && f.title)
+        .filter(
+          (f) =>
+            f &&
+            f.title &&
+            f.id !== 'feat-it-support-hotline' &&
+            !String(f.title).toLowerCase().includes('it & pos systems support')
+        )
         .map((f, idx) => ({
           id: f.id || `custom-feat-${idx + 1}`,
           title: String(f.title).trim(),
           description: String(f.description || '').trim(),
           badge: String(f.badge || 'Active Module').trim(),
-          category: (['Operations', 'Training', 'Compliance', 'Announcement', 'IT Support'].includes(
+          category: (['Operations', 'Training', 'Compliance', 'Announcement'].includes(
             f.category
           )
             ? f.category
@@ -3247,7 +3240,7 @@ export function normalizeItPortalConfig(raw?: Partial<ItPortalConfig> | null): I
           targetTab: f.targetTab,
           createdAt: f.createdAt || new Date().toISOString(),
         }))
-    : [...DEFAULT_IT_PORTAL_CONFIG.customFeatures];
+    : [];
 
   return {
     branches,
